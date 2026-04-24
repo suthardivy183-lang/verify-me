@@ -199,7 +199,7 @@
   <script type="text/babel">
     const { useEffect, useState } = React;
 
-    const API_BASE = "http://localhost:8000";
+    const API_BASE = "http://127.0.0.1:8000";
     const ORG_ID = "demo_org";
     const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
@@ -285,7 +285,6 @@
         }
 
         setSelectedFile(file);
-        setResult(null);
       }
 
       function handleFileInput(event) {
@@ -556,7 +555,7 @@
       }
 
       const verdict = normalizeVerdict(result.verdict || result.prediction);
-      const confidence = clampNumber(Number(result.confidence) || 0, 0, 100);
+      const confidence = clampNumber(parseFloat(String(result.confidence ?? "").replace("%", "")) || 0, 0, 100);
       const riskScore = clampNumber(Number(result.risk_score) || 0, 0, 100);
       const riskLevel = normalizeRiskLevel(result.risk_level, riskScore);
       const timestamp = result.timestamp || new Date().toISOString();

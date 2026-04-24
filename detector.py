@@ -1,20 +1,42 @@
 import os
 import re
 import json
+import math
 from collections import Counter
 from functools import lru_cache
 
 import cv2
 import numpy as np
-from PIL import ExifTags, Image, UnidentifiedImageError
+import PIL
+import torch
+from PIL import ExifTags, Image, PngImagePlugin, UnidentifiedImageError
+from transformers import CLIPModel, CLIPProcessor
+
+if not hasattr(PIL, "PngImagePlugin"):
+    PIL.PngImagePlugin = PngImagePlugin
 
 
-MODEL_INPUT_SIZE = (224, 224)
-LOW_FAKE_THRESHOLD = 0.4
-HIGH_FAKE_THRESHOLD = 0.6
+LOW_FAKE_THRESHOLD = 0.35
+HIGH_FAKE_THRESHOLD = 0.65
 MAX_FALLBACK_CONFIDENCE = 0.40
 MAX_DOCUMENT_BYTES = 2_000_000
-GEMINI_MODEL_NAME = "gemini-1.5-flash"
+MODEL_INPUT_SIZE = (224, 224)
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+CLIP_MODEL_NAME = os.getenv("CLIP_MODEL_NAME", "openai/clip-vit-base-patch32").strip() or "openai/clip-vit-base-patch32"
+CLIP_PROMPT_PAIRS = [
+    {
+        "real": "an authentic portrait photo of a real person",
+        "fake": "a deepfake portrait of a person",
+    },
+    {
+        "real": "a genuine unedited face photograph",
+        "fake": "a manipulated or synthetic face image",
+    },
+    {
+        "real": "a natural camera photo of a human face",
+        "fake": "an AI-generated or face-swapped human image",
+    },
+]
 
 GEMINI_IMAGE_PROMPT = """You are an AI forensics expert. Analyze this image and determine if it is 
 AI-generated, manipulated, or authentic. 
@@ -70,6 +92,13 @@ def _percent(value: float) -> str:
     return f"{_clamp(value) * 100:.2f}%"
 
 
+def _to_risk_score(fake_score: float) -> int:
+    clamped_score = _clamp(fake_score)
+    if clamped_score <= 0.0:
+        return 0
+    return min(100, max(1, int(math.ceil(clamped_score * 100))))
+
+
 def _risk_level(fake_score: float) -> str:
     if fake_score >= 0.75:
         return "High"
@@ -109,9 +138,16 @@ def _classify_fake_score(fake_score: float, model_loaded: bool) -> str:
 
 
 def _prediction_confidence(fake_score: float, prediction: str, source: str) -> float:
-    if source != "model":
-        return MAX_FALLBACK_CONFIDENCE
-    return 1.0 - fake_score
+    normalized_prediction = str(prediction).strip().upper()
+    if "UNCERTAIN" in normalized_prediction:
+        confidence = MAX_FALLBACK_CONFIDENCE
+    elif "FAKE" in normalized_prediction:
+        confidence = fake_score
+    elif "REAL" in normalized_prediction:
+        confidence = 1.0 - fake_score
+    else:
+        confidence = MAX_FALLBACK_CONFIDENCE
+    return _clamp(max(confidence, 0.01))
 
 
 def _log_gemini_error(error: Exception) -> None:
@@ -170,7 +206,7 @@ def _parse_gemini_json(response) -> dict:
 
 def _normalize_gemini_payload(payload: dict) -> dict:
     fake_probability = _clamp(float(payload.get("fake_probability", 0.5)))
-    risk_score = int(round(_clamp(float(payload.get("risk_score", fake_probability * 100)), 0, 100)))
+    risk_score = int(_clamp(float(payload.get("risk_score", _to_risk_score(fake_probability))), 0, 100))
     if "fake_probability" not in payload:
         fake_probability = _clamp(risk_score / 100)
 
@@ -238,18 +274,24 @@ def _format_gemini_result(asset_type: str, payload: dict, details: dict = None) 
     }
 
 
-def _analyze_image_with_gemini(image: Image.Image) -> dict:
+def _generate_gemini_image_explanation(image: Image.Image, score: float) -> str:
     model = _get_gemini_model()
     if model is None:
-        return None
+        return "Explanation unavailable"
+
+    prompt = (
+        f"This image has a deepfake probability score of {score:.4f}. "
+        "In 2 sentences, explain what visual signals might indicate "
+        "this. Be specific about artifacts, lighting, or texture."
+    )
 
     try:
-        response = model.generate_content([GEMINI_IMAGE_PROMPT, image])
-        payload = _normalize_gemini_payload(_parse_gemini_json(response))
-        return _format_gemini_result("image", payload)
+        response = model.generate_content([prompt, image])
+        text = _extract_gemini_text(response)
+        return text or "Explanation unavailable"
     except Exception as exc:
         _log_gemini_error(exc)
-        return None
+        return "Explanation unavailable"
 
 
 def _analyze_document_with_gemini(text: str, extracted: dict) -> dict:
@@ -276,118 +318,68 @@ def _analyze_document_with_gemini(text: str, extracted: dict) -> dict:
         return None
 
 
-def _analyze_video_with_gemini(sampled: dict) -> dict:
-    model = _get_gemini_model()
-    if model is None:
-        return None
-
-    try:
-        frame_payloads = []
-        for frame in sampled["frames"]:
-            response = model.generate_content([GEMINI_IMAGE_PROMPT, frame["image"]])
-            payload = _normalize_gemini_payload(_parse_gemini_json(response))
-            frame_payloads.append(
-                {
-                    "frame_index": frame["frame_index"],
-                    "fake_probability": payload["fake_probability"],
-                    "risk_score": payload["risk_score"],
-                    "verdict": payload["verdict"],
-                    "confidence": payload["confidence"],
-                }
-            )
-
-        if not frame_payloads:
-            raise ValueError("Gemini did not analyze any video frames")
-
-        fake_scores = [frame["fake_probability"] for frame in frame_payloads]
-        risk_scores = [frame["risk_score"] for frame in frame_payloads]
-        average_fake_probability = float(np.mean(fake_scores))
-        average_risk_score = int(round(float(np.mean(risk_scores))))
-        verdict = _gemini_prediction(average_fake_probability)
-        risk_level = _gemini_risk_level(average_fake_probability)
-        confidence = _clamp(1.0 - min(abs(average_fake_probability - 0.5) * 2, 1.0) * 0.25)
-
-        payload = {
-            "prediction": verdict,
-            "verdict": verdict,
-            "confidence": confidence,
-            "fake_probability": average_fake_probability,
-            "risk_score": average_risk_score,
-            "risk_level": risk_level,
-            "signals": {
-                "frames_analyzed": len(frame_payloads),
-                "per_frame_scores": frame_payloads,
-                "source": "gemini",
-                "model_loaded": True,
-            },
-        }
-        details = {
-            "metadata_status": "not_applicable",
-            "metadata": {
-                "total_frames": sampled["total_frames"],
-                "fps": sampled["fps"],
-                "sampled_frames": sampled["sampled_frames"],
-            },
-            "frame_analysis": {
-                "aggregate_score": average_fake_probability,
-                "min_score": float(np.min(fake_scores)),
-                "max_score": float(np.max(fake_scores)),
-                "score_std": float(np.std(fake_scores)),
-                "frames": frame_payloads,
-            },
-        }
-        return _format_gemini_result("video", payload, details)
-    except Exception as exc:
-        _log_gemini_error(exc)
-        return None
+def _generate_gemini_video_explanation(frame: Image.Image, score: float) -> str:
+    return _generate_gemini_image_explanation(frame, score)
 
 
 @lru_cache(maxsize=1)
 def load_model() -> dict:
-    model_path = os.getenv("IMAGE_MODEL_PATH", "").strip()
-    print(f"Model path: {model_path or 'not set'}", flush=True)
-
-    if not model_path:
-        print("Model loaded status: false", flush=True)
-        print("Model load error: IMAGE_MODEL_PATH is not set", flush=True)
-        return {
-            "model": None,
-            "model_loaded": False,
-            "model_path": "",
-            "error": "IMAGE_MODEL_PATH is not set",
-        }
-
-    if not os.path.exists(model_path):
-        print("Model loaded status: false", flush=True)
-        print(f"Model load error: IMAGE_MODEL_PATH does not exist: {model_path}", flush=True)
-        return {
-            "model": None,
-            "model_loaded": False,
-            "model_path": model_path,
-            "error": f"IMAGE_MODEL_PATH does not exist: {model_path}",
-        }
+    print("Loading CLIP model...", flush=True)
+    print(f"CLIP model: {CLIP_MODEL_NAME}", flush=True)
 
     try:
-        from tensorflow.keras.models import load_model as keras_load_model
-
-        model = keras_load_model(model_path)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = CLIPModel.from_pretrained(CLIP_MODEL_NAME)
+        processor = CLIPProcessor.from_pretrained(CLIP_MODEL_NAME)
+        model.eval()
+        model.to(device)
     except Exception as exc:
         print("Model loaded status: false", flush=True)
         print(f"Model load error: {exc}", flush=True)
         return {
             "model": None,
+            "processor": None,
+            "device": "cpu",
             "model_loaded": False,
-            "model_path": model_path,
+            "model_name": CLIP_MODEL_NAME,
             "error": str(exc),
         }
 
+    print("Model loaded successfully", flush=True)
     print("Model loaded status: true", flush=True)
     return {
         "model": model,
+        "processor": processor,
+        "device": device,
         "model_loaded": True,
-        "model_path": model_path,
+        "model_name": CLIP_MODEL_NAME,
         "error": "",
     }
+
+
+@lru_cache(maxsize=1)
+def load_keras_model() -> dict:
+    model_path = os.getenv("IMAGE_MODEL_PATH", "").strip()
+    if not model_path:
+        return {"model": None, "model_loaded": False, "model_name": "Keras", "error": "IMAGE_MODEL_PATH is not set"}
+    if not os.path.exists(model_path):
+        fallback_model_path = os.path.join(os.path.dirname(__file__), os.path.basename(model_path))
+        if os.path.exists(fallback_model_path):
+            model_path = fallback_model_path
+        else:
+            return {
+                "model": None,
+                "model_loaded": False,
+                "model_name": "Keras",
+                "error": f"IMAGE_MODEL_PATH does not exist: {model_path}",
+            }
+    try:
+        from tensorflow.keras.models import load_model as keras_load_model
+
+        model = keras_load_model(model_path)
+    except Exception as exc:
+        return {"model": None, "model_loaded": False, "model_name": "Keras", "error": str(exc)}
+    return {"model": model, "model_loaded": True, "model_name": "Keras", "error": ""}
 
 
 def _open_image(image_path: str) -> Image.Image:
@@ -400,74 +392,121 @@ def _open_image(image_path: str) -> Image.Image:
 def preprocess_image(image: Image.Image) -> np.ndarray:
     image = image.convert("RGB").resize(MODEL_INPUT_SIZE, Image.Resampling.LANCZOS)
     image_array = np.asarray(image, dtype=np.float32) / 255.0
-
-    expected_shape = (MODEL_INPUT_SIZE[1], MODEL_INPUT_SIZE[0], 3)
-    if image_array.shape != expected_shape:
-        raise ValueError(f"Invalid preprocessed image shape: {image_array.shape}")
-
-    model_input = np.expand_dims(image_array, axis=0)
-    expected_input_shape = (1, MODEL_INPUT_SIZE[1], MODEL_INPUT_SIZE[0], 3)
-    if model_input.shape != expected_input_shape:
-        raise ValueError(f"Invalid model input shape: {model_input.shape}")
-
-    return model_input
-
-
-def _extract_probability(raw_prediction) -> float:
-    prediction_array = np.asarray(raw_prediction, dtype=np.float32)
-
-    if prediction_array.size == 1:
-        probability = float(prediction_array.reshape(-1)[0])
-    else:
-        probability_index = int(os.getenv("MODEL_PROBABILITY_INDEX", "1"))
-        flat_prediction = prediction_array.reshape(-1)
-        if probability_index < 0 or probability_index >= flat_prediction.size:
-            raise RuntimeError(
-                f"MODEL_PROBABILITY_INDEX {probability_index} is out of range "
-                f"for prediction shape {prediction_array.shape}"
-            )
-        probability = float(flat_prediction[probability_index])
-
-    if not np.isfinite(probability):
-        raise RuntimeError(f"Model returned a non-finite probability: {probability}")
-    if probability < -1e-6 or probability > 1 + 1e-6:
-        raise RuntimeError(f"Model returned probability outside [0, 1]: {probability}")
-
-    return _clamp(probability)
-
-
-def _normalize_model_probability(probability: float) -> float:
-    high_value_label = os.getenv("MODEL_HIGH_VALUE_LABEL", "fake").strip().lower()
-    if high_value_label not in {"fake", "real"}:
-        raise RuntimeError('MODEL_HIGH_VALUE_LABEL must be either "fake" or "real"')
-    return probability if high_value_label == "fake" else 1.0 - probability
+    return np.expand_dims(image_array, axis=0)
 
 
 def predict_image(image: Image.Image) -> dict:
+    keras_state = load_keras_model()
+    if keras_state["model_loaded"]:
+        try:
+            model_input = preprocess_image(image)
+            print(f"[DEBUG] Keras model input_shape: {getattr(keras_state['model'], 'input_shape', None)}", flush=True)
+            print(f"[DEBUG] preprocess output shape: {model_input.shape}", flush=True)
+            print(f"[DEBUG] preprocess dtype: {model_input.dtype}", flush=True)
+            print(
+                f"[DEBUG] preprocess value range: min={float(np.min(model_input)):.6f}, max={float(np.max(model_input)):.6f}",
+                flush=True,
+            )
+            print(
+                "[DEBUG] preprocess pipeline uses PIL RGB conversion (not OpenCV BGR) and scales pixels by /255.0",
+                flush=True,
+            )
+            raw_prediction = np.asarray(keras_state["model"].predict(model_input, verbose=0), dtype=np.float32).reshape(-1)
+            print(f"[DEBUG] model.predict raw shape: {raw_prediction.shape}", flush=True)
+            print(f"[DEBUG] model.predict raw values: {raw_prediction.tolist()}", flush=True)
+            probability_index = int(os.getenv("MODEL_PROBABILITY_INDEX", "1")) if raw_prediction.size > 1 else 0
+            if probability_index < 0 or probability_index >= raw_prediction.size:
+                probability_index = 0
+            print(f"[DEBUG] MODEL_PROBABILITY_INDEX: {probability_index}", flush=True)
+            print(f"[DEBUG] selected output value: {float(raw_prediction[probability_index]):.8f}", flush=True)
+            print(
+                f"[DEBUG] MODEL_HIGH_VALUE_LABEL: {os.getenv('MODEL_HIGH_VALUE_LABEL', 'fake').strip().lower()}",
+                flush=True,
+            )
+            fake_probability = _clamp(float(raw_prediction[probability_index]))
+            print("Prediction source: model", flush=True)
+            print(f"Raw prediction value: {fake_probability:.8f}", flush=True)
+            return {
+                "source": "model",
+                "model_loaded": True,
+                "model_name": keras_state["model_name"],
+                "raw_prediction": raw_prediction.tolist(),
+                "fake_probability": fake_probability,
+                "label_scores": None,
+                "labels": None,
+                "fallback_reason": "",
+                "reliability_score": 0.90,
+            }
+        except Exception as exc:
+            print(f"Keras prediction error: {exc}", flush=True)
+
     model_state = load_model()
     if not model_state["model_loaded"]:
         print("Prediction source: fallback", flush=True)
         return {
             "source": "fallback",
             "model_loaded": False,
-            "model_path": model_state["model_path"],
+            "model_name": model_state["model_name"],
             "raw_prediction": None,
             "fake_probability": None,
-            "fallback_reason": model_state["error"],
+            "fallback_reason": model_state["error"] if model_state["error"] else keras_state["error"],
             "reliability_score": 0.0,
         }
 
     try:
-        model_input = preprocess_image(image)
-        raw_prediction = _extract_probability(model_state["model"].predict(model_input, verbose=0))
-        fake_probability = _normalize_model_probability(raw_prediction)
+        print("Running inference...", flush=True)
+        image = image.convert("RGB")
+
+        # CLIP is used here as a balanced zero-shot ranker.
+        # We compare the image against several binary real-vs-fake prompt pairs,
+        # softmax each pair independently, then average the "fake" probabilities.
+        pair_results = []
+
+        with torch.no_grad():
+            for prompt_pair in CLIP_PROMPT_PAIRS:
+                real_prompt = prompt_pair["real"]
+                fake_prompt = prompt_pair["fake"]
+                inputs = model_state["processor"](
+                    text=[real_prompt, fake_prompt],
+                    images=image,
+                    return_tensors="pt",
+                    padding=True,
+                )
+                inputs = {
+                    key: value.to(model_state["device"]) if hasattr(value, "to") else value
+                    for key, value in inputs.items()
+                }
+                outputs = model_state["model"](**inputs)
+                logits = outputs.logits_per_image[0]
+                probabilities = torch.softmax(logits, dim=0).detach().cpu().tolist()
+                pair_results.append(
+                    {
+                        "real_prompt": real_prompt,
+                        "fake_prompt": fake_prompt,
+                        "real_probability": float(probabilities[0]),
+                        "fake_probability": float(probabilities[1]),
+                    }
+                )
+
+        fake_probability = _clamp(
+            float(np.mean([pair["fake_probability"] for pair in pair_results]))
+        )
+        label_scores = {
+            f"pair_{index + 1}": {
+                "real_prompt": pair["real_prompt"],
+                "fake_prompt": pair["fake_prompt"],
+                "real_probability": pair["real_probability"],
+                "fake_probability": pair["fake_probability"],
+            }
+            for index, pair in enumerate(pair_results)
+        }
     except Exception as exc:
         print("Prediction source: fallback", flush=True)
         print(f"Model prediction error: {exc}", flush=True)
         return {
             "source": "fallback",
             "model_loaded": False,
-            "model_path": model_state["model_path"],
+            "model_name": model_state["model_name"],
             "raw_prediction": None,
             "fake_probability": None,
             "fallback_reason": f"model prediction failed: {exc}",
@@ -475,18 +514,18 @@ def predict_image(image: Image.Image) -> dict:
         }
 
     print("Prediction source: model", flush=True)
-    print(f"Raw prediction value: {raw_prediction:.8f}", flush=True)
+    print(f"Raw prediction value: {fake_probability:.8f}", flush=True)
 
     return {
         "source": "model",
         "model_loaded": True,
-        "model_path": model_state["model_path"],
-        "raw_prediction": raw_prediction,
+        "model_name": model_state["model_name"],
+        "raw_prediction": label_scores,
         "fake_probability": fake_probability,
-        "model_high_value_label": os.getenv("MODEL_HIGH_VALUE_LABEL", "fake").strip().lower(),
-        "input_shape": [1, MODEL_INPUT_SIZE[1], MODEL_INPUT_SIZE[0], 3],
+        "label_scores": label_scores,
+        "labels": [dict(prompt_pair) for prompt_pair in CLIP_PROMPT_PAIRS],
         "fallback_reason": "",
-        "reliability_score": 0.92,
+        "reliability_score": 0.82,
     }
 
 
@@ -603,7 +642,7 @@ def fuse_results(model_result: dict, metadata_result: dict, heuristic_result: di
         "fake_probability": final_fake_score,
         "metadata_status": metadata_result["metadata_status"],
         "risk_level": _risk_level(final_fake_score),
-        "risk_score": int(round(final_fake_score * 100)),
+        "risk_score": _to_risk_score(final_fake_score),
         "verdict": prediction if prediction == "Uncertain" else prediction.upper(),
         "details": {
             "fake_probability": final_fake_score,
@@ -626,7 +665,12 @@ def fuse_results(model_result: dict, metadata_result: dict, heuristic_result: di
 
 
 def _format_image_result(fused: dict) -> dict:
+    explanation = fused.get("gemini_explanation", "Explanation unavailable")
+    explanation_source = "gemini" if explanation != "Explanation unavailable" else "unavailable"
+    score_source = "clip_model" if fused["model_loaded"] else "heuristic"
+
     return {
+        "model": "CLIP",
         "type": "image",
         "prediction": fused["prediction"],
         "confidence": fused["confidence"],
@@ -642,6 +686,9 @@ def _format_image_result(fused: dict) -> dict:
             "fake_score": fused["fake_probability"],
             "source": fused["source"],
             "model_loaded": fused["model_loaded"],
+            "score_source": score_source,
+            "explanation_source": explanation_source,
+            "gemini_explanation": explanation,
             "reliability_score": fused["reliability_score"],
             "metadata_status": fused["metadata_status"],
             "model_score": fused["details"]["model_score"],
@@ -653,14 +700,56 @@ def _format_image_result(fused: dict) -> dict:
 
 def analyze_image(image_path: str) -> dict:
     image = _open_image(image_path)
-    gemini_result = _analyze_image_with_gemini(image)
-    if gemini_result:
-        return gemini_result
-
     model_result = predict_image(image)
     metadata_result = analyze_metadata(image_path)
     heuristic_result = analyze_heuristics(image)
-    fused = fuse_results(model_result, metadata_result, heuristic_result)
+    model_loaded = bool(model_result["model_loaded"])
+    fake_score = model_result["fake_probability"] if model_loaded else heuristic_result["heuristic_score"]
+    score_source = "clip_model" if model_loaded else "heuristic"
+    prediction = _classify_fake_score(fake_score, model_loaded)
+    confidence = _prediction_confidence(fake_score, prediction, model_result["source"])
+
+    if model_result["source"] == "fallback":
+        confidence = min(confidence, MAX_FALLBACK_CONFIDENCE)
+
+    gemini_explanation = _generate_gemini_image_explanation(image, fake_score)
+
+    print(f"Final fake score: {fake_score:.8f}", flush=True)
+    print(f"Final label: {prediction}", flush=True)
+
+    fused = {
+        "prediction": prediction,
+        "confidence": _percent(confidence),
+        "source": model_result["source"],
+        "model_loaded": model_loaded,
+        "reliability_score": round(model_result["reliability_score"] if model_loaded else 0.25, 4),
+        "fake_probability": fake_score,
+        "metadata_status": metadata_result["metadata_status"],
+        "risk_level": _risk_level(fake_score),
+        "risk_score": _to_risk_score(fake_score),
+        "verdict": prediction if prediction == "Uncertain" else prediction.upper(),
+        "gemini_explanation": gemini_explanation,
+        "details": {
+            "fake_probability": fake_score,
+            "model_score": model_result["fake_probability"],
+            "metadata_score": metadata_result["metadata_score"],
+            "heuristic_score": heuristic_result["heuristic_score"],
+            "metadata_status": metadata_result["metadata_status"],
+            "score_source": score_source,
+            "gemini": {
+                "model": GEMINI_MODEL_NAME,
+                "explanation": gemini_explanation,
+            },
+            "clip": {
+                "model": model_result.get("model_name", CLIP_MODEL_NAME),
+                "labels": model_result.get("labels", [dict(prompt_pair) for prompt_pair in CLIP_PROMPT_PAIRS]),
+                "label_scores": model_result.get("label_scores"),
+            },
+            "model": model_result,
+            "metadata": metadata_result,
+            "heuristics": heuristic_result,
+        },
+    }
     return _format_image_result(fused)
 
 
@@ -673,6 +762,7 @@ def _finalize_fallback_result(asset_type: str, fake_score: float, details: dict,
     print("Final label: Uncertain", flush=True)
 
     return {
+        "model": "CLIP",
         "type": asset_type,
         "prediction": "Uncertain",
         "confidence": _percent(confidence),
@@ -682,7 +772,7 @@ def _finalize_fallback_result(asset_type: str, fake_score: float, details: dict,
         "metadata_status": details.get("metadata_status", "not_applicable"),
         "risk_level": _risk_level(fake_score),
         "details": details,
-        "risk_score": int(round(fake_score * 100)),
+        "risk_score": _to_risk_score(fake_score),
         "verdict": "Uncertain",
         "signals": {
             "fake_score": fake_score,
@@ -835,24 +925,26 @@ def _sample_video_frames(video_path: str) -> dict:
 
 def analyze_video(video_path: str) -> dict:
     sampled = _sample_video_frames(video_path)
-    gemini_result = _analyze_video_with_gemini(sampled)
-    if gemini_result:
-        return gemini_result
 
     frame_results = []
 
     for frame in sampled["frames"]:
         model_result = predict_image(frame["image"])
         heuristic_result = analyze_heuristics(frame["image"])
-        frame_score = model_result["fake_probability"] if model_result["model_loaded"] else heuristic_result["heuristic_score"]
+        frame_model_loaded = bool(model_result["model_loaded"])
+        frame_score = model_result["fake_probability"] if frame_model_loaded else heuristic_result["heuristic_score"]
         frame_results.append(
             {
                 "frame_index": frame["frame_index"],
                 "fake_probability": frame_score,
+                "score_source": "clip_model" if frame_model_loaded else "heuristic",
                 "source": model_result["source"],
-                "model_loaded": model_result["model_loaded"],
+                "model_loaded": frame_model_loaded,
                 "raw_prediction": model_result["raw_prediction"],
+                "model_score": model_result["fake_probability"],
+                "label_scores": model_result.get("label_scores"),
                 "heuristics": heuristic_result,
+                "image": frame["image"],
             }
         )
 
@@ -877,9 +969,19 @@ def analyze_video(video_path: str) -> dict:
             "min_score": float(np.min(frame_scores)),
             "max_score": float(np.max(frame_scores)),
             "score_std": float(np.std(frame_scores)),
-            "frames": frame_results,
+            "frames": [
+                {key: value for key, value in frame.items() if key != "image"}
+                for frame in frame_results
+            ],
         },
     }
+
+    highest_risk_frame = max(frame_results, key=lambda frame: frame["fake_probability"])
+    gemini_explanation = _generate_gemini_video_explanation(
+        highest_risk_frame["image"], highest_risk_frame["fake_probability"]
+    )
+    explanation_source = "gemini" if gemini_explanation != "Explanation unavailable" else "unavailable"
+    score_source = "clip_model" if model_loaded else "heuristic"
 
     if not model_loaded:
         result = _finalize_fallback_result("video", aggregate_score, details, 0.30)
@@ -887,6 +989,7 @@ def analyze_video(video_path: str) -> dict:
         prediction = _classify_fake_score(aggregate_score, True)
         confidence = _prediction_confidence(aggregate_score, prediction, "model")
         result = {
+            "model": "CLIP",
             "type": "video",
             "prediction": prediction,
             "confidence": _percent(confidence),
@@ -896,17 +999,41 @@ def analyze_video(video_path: str) -> dict:
             "metadata_status": "not_applicable",
             "risk_level": _risk_level(aggregate_score),
             "details": details,
-            "risk_score": int(round(aggregate_score * 100)),
+            "risk_score": _to_risk_score(aggregate_score),
             "verdict": prediction if prediction == "Uncertain" else prediction.upper(),
             "signals": {
                 "fake_score": aggregate_score,
                 "source": source,
                 "model_loaded": True,
+                "score_source": "clip_model",
+                "explanation_source": explanation_source,
+                "gemini_explanation": gemini_explanation,
                 "sampled_frames": sampled["sampled_frames"],
                 "model_frame_count": len(model_frames),
                 "fallback_frame_count": len(frame_results) - len(model_frames),
             },
         }
+
+    result["details"]["gemini"] = {
+        "model": GEMINI_MODEL_NAME,
+        "explanation": gemini_explanation,
+        "highest_risk_frame_index": highest_risk_frame["frame_index"],
+        "highest_risk_frame_score": highest_risk_frame["fake_probability"],
+    }
+    result["details"]["clip"] = {
+        "model": CLIP_MODEL_NAME,
+        "labels": [dict(prompt_pair) for prompt_pair in CLIP_PROMPT_PAIRS],
+        "highest_risk_frame_index": highest_risk_frame["frame_index"],
+        "highest_risk_frame_label_scores": highest_risk_frame.get("label_scores"),
+    }
+    result["signals"].update(
+        {
+            "score_source": score_source,
+            "explanation_source": explanation_source,
+            "gemini_explanation": gemini_explanation,
+            "model_loaded": model_loaded,
+        }
+    )
 
     return result
 

@@ -6,8 +6,11 @@ from datetime import datetime
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from dotenv import load_dotenv
 
 from report import generate_report
+
+load_dotenv()
 
 try:
     import firebase_admin

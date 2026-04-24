@@ -11,7 +11,7 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  const API_BASE = "http://localhost:8000";
+  const API_BASE = "http://127.0.0.1:8000";
 
   useEffect(() => {
     if (currentPage !== "history") return;
@@ -120,7 +120,7 @@ export default function App() {
     const color = verdict === "LIKELY FAKE" ? "var(--danger)" : "var(--success)";
 
     return (
-      <span style={{ color, fontWeight: 800, fontSize }}>
+      <span style={{ color, fontWeight: 800, fontSize: size }}>
         {verdict || "UNKNOWN"}
       </span>
     );
