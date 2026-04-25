@@ -1,12 +1,16 @@
 import os
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 
 
-cred = credentials.Certificate(os.getenv("FIREBASE_KEY_PATH", "serviceAccountKey.json"))
+BASE_DIR = Path(__file__).resolve().parent
+default_key_path = BASE_DIR / "firebasekey.json"
+
+cred = credentials.Certificate(os.getenv("FIREBASE_KEY_PATH", str(default_key_path)))
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
