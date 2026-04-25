@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VerifyMe | Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Plus Jakarta Sans", "ui-sans-serif", "system-ui", "sans-serif"],
+            serif: ["Fraunces", "ui-serif", "Georgia", "serif"],
+          },
+          colors: {
+            panel: "#10172a",
+            panelSoft: "#121c33",
+            edge: "#27344f",
+            accent: "#78e6ff",
+            accentSoft: "#0c2a3d",
+            warning: "#f6c46a",
+            danger: "#ff7592",
+            safe: "#57d9be",
+            ink: "#e9f0fb",
+            muted: "#9fb0cb",
+          },
+          boxShadow: {
+            panel: "0 28px 88px rgba(9, 15, 30, 0.55)",
+          },
+        },
+      },
+    };
+  </script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/@remix-run/router@1.19.2/dist/router.umd.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-router@6.30.1/dist/umd/react-router.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-router-dom@6.30.1/dist/umd/react-router-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@3.2.1/umd/Recharts.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="min-h-screen bg-[#05070e] text-ink">
+  <div id="root" class="min-h-screen flex items-center justify-center px-6">
+    <div class="w-full max-w-md rounded-[30px] border border-white/15 bg-gradient-to-b from-white/[0.12] to-white/[0.04] p-8 text-center shadow-2xl backdrop-blur-xl">
+      <div class="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-white/20 border-t-[#78e6ff]"></div>
+      <p class="mt-4 text-lg font-bold text-white">Loading VerifyMe</p>
+      <p class="mt-2 text-sm text-[#9fb0cb]">Preparing cinematic dashboard modules...</p>
+    </div>
+  </div>
+
+  <script>
+    (async function loadApp() {
+      const root = document.getElementById("root");
+      const files = ["ui.jsx", "Dashboard.jsx", "Verify.jsx", "History.jsx", "App.jsx"];
+
+      function showError(message) {
+        root.innerHTML = `
+          <div style="width:100%;max-width:720px;border:1px solid rgba(239,68,68,.2);background:rgba(127,29,29,.18);border-radius:28px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.35);">
+            <div style="font-size:28px;font-weight:800;color:#fff;">Frontend failed to load</div>
+            <div style="margin-top:12px;font-size:14px;line-height:1.7;color:#fecaca;">${message}</div>
+          </div>
+        `;
+      }
+
+      try {
+        for (const file of files) {
+          const response = await fetch(`./${file}`);
+          if (!response.ok) {
+            throw new Error(`Could not load ${file} (${response.status})`);
+          }
+
+          const source = await response.text();
+          const transformed = Babel.transform(source, {
+            presets: ["react"],
+            sourceType: "script",
+          }).code;
+
+          window.eval(`${transformed}\n//# sourceURL=${file}`);
+        }
+      } catch (error) {
+        showError(error && error.message ? error.message : "Unknown frontend loading error.");
+      }
+    })();
+  </script>
+</body>
+</html>
