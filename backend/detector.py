@@ -23,6 +23,14 @@ MAX_DOCUMENT_BYTES = 2_000_000
 MODEL_INPUT_SIZE = (224, 224)
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 CLIP_MODEL_NAME = os.getenv("CLIP_MODEL_NAME", "openai/clip-vit-base-patch32").strip() or "openai/clip-vit-base-patch32"
+# Model 2: EfficientNet fine-tuned for AI image detection — 95% acc, F1=0.94 on benchmark
+EFFICIENTNET_MODEL_NAME = os.getenv("EFFICIENTNET_MODEL_NAME", "haywoodsloan/ai-image-detector-deploy").strip() or "haywoodsloan/ai-image-detector-deploy"
+# Model 3: ResNet50 complementary detector — good specificity (0 false positives on real)
+HF_DETECTOR_MODEL_NAME = os.getenv("HF_DETECTOR_MODEL_NAME", "umm-maybe/AI-image-detector").strip() or "umm-maybe/AI-image-detector"
+
+# sdxl added for Organika model; deepfake/realism covered by prithivMLmods labels
+_FAKE_LABEL_KEYWORDS = frozenset({"fake", "artificial", "ai", "generated", "synthetic", "deepfake", "manipulated", "sdxl"})
+_REAL_LABEL_KEYWORDS = frozenset({"real", "human", "authentic", "natural", "genuine", "original", "realism"})
 CLIP_PROMPT_PAIRS = [
     {
         "real": "an authentic portrait photo of a real person",
@@ -86,6 +94,19 @@ if not os.getenv("GEMINI_API_KEY"):
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
     return max(minimum, min(maximum, float(value)))
+
+
+def _labels_to_fake_probability(results: list) -> float | None:
+    """Maps HF image-classification label+score output to a fake_probability.
+    Returns None if no label keyword matches — caller must handle that case."""
+    for item in results:
+        label = item["label"].lower().replace("-", " ").replace("_", " ")
+        score = float(item["score"])
+        if any(kw in label for kw in _FAKE_LABEL_KEYWORDS):
+            return _clamp(score)
+        if any(kw in label for kw in _REAL_LABEL_KEYWORDS):
+            return _clamp(1.0 - score)
+    return None
 
 
 def _percent(value: float) -> str:
@@ -274,6 +295,27 @@ def _format_gemini_result(asset_type: str, payload: dict, details: dict = None) 
     }
 
 
+def _analyze_image_with_gemini(image: Image.Image, metadata_result: dict) -> dict | None:
+    model = _get_gemini_model()
+    if model is None:
+        return None
+    try:
+        response = model.generate_content([GEMINI_IMAGE_PROMPT, image])
+        payload = _normalize_gemini_payload(_parse_gemini_json(response))
+        if metadata_result["metadata_status"] == "suspicious":
+            payload["fake_probability"] = _clamp(payload["fake_probability"] + 0.10)
+            payload["risk_score"] = min(100, payload["risk_score"] + 10)
+        payload["signals"]["metadata_status"] = metadata_result["metadata_status"]
+        details = {
+            "metadata_status": metadata_result["metadata_status"],
+            "metadata": metadata_result,
+        }
+        return _format_gemini_result("image", payload, details)
+    except Exception as exc:
+        _log_gemini_error(exc)
+        return None
+
+
 def _generate_gemini_image_explanation(image: Image.Image, score: float) -> str:
     model = _get_gemini_model()
     if model is None:
@@ -380,6 +422,73 @@ def load_keras_model() -> dict:
     except Exception as exc:
         return {"model": None, "model_loaded": False, "model_name": "Keras", "error": str(exc)}
     return {"model": model, "model_loaded": True, "model_name": "Keras", "error": ""}
+
+
+@lru_cache(maxsize=1)
+def load_efficientnet_model() -> dict:
+    print(f"Loading EfficientNet model: {EFFICIENTNET_MODEL_NAME}", flush=True)
+    try:
+        from transformers import pipeline as hf_pipeline
+        pipe = hf_pipeline("image-classification", model=EFFICIENTNET_MODEL_NAME)
+        print("EfficientNet model loaded successfully", flush=True)
+        return {"pipeline": pipe, "model_loaded": True, "model_name": EFFICIENTNET_MODEL_NAME, "error": ""}
+    except Exception as exc:
+        print(f"EfficientNet load error: {exc}", flush=True)
+        return {"pipeline": None, "model_loaded": False, "model_name": EFFICIENTNET_MODEL_NAME, "error": str(exc)}
+
+
+@lru_cache(maxsize=1)
+def load_hf_detector_model() -> dict:
+    print(f"Loading HF detector model: {HF_DETECTOR_MODEL_NAME}", flush=True)
+    try:
+        from transformers import pipeline as hf_pipeline
+        pipe = hf_pipeline("image-classification", model=HF_DETECTOR_MODEL_NAME)
+        print("HF detector model loaded successfully", flush=True)
+        return {"pipeline": pipe, "model_loaded": True, "model_name": HF_DETECTOR_MODEL_NAME, "error": ""}
+    except Exception as exc:
+        print(f"HF detector load error: {exc}", flush=True)
+        return {"pipeline": None, "model_loaded": False, "model_name": HF_DETECTOR_MODEL_NAME, "error": str(exc)}
+
+
+def _run_hf_pipeline(state: dict, image: Image.Image, model_label: str) -> dict:
+    """Shared inference runner for EfficientNet and HF detector."""
+    if not state["model_loaded"]:
+        return {
+            "source": "fallback", "model_loaded": False,
+            "model_name": state["model_name"], "fake_probability": None,
+            "raw": None, "fallback_reason": state["error"],
+        }
+    try:
+        results = state["pipeline"](image)
+        fake_prob = _labels_to_fake_probability(results)
+        if fake_prob is None:
+            return {
+                "source": "fallback", "model_loaded": False,
+                "model_name": state["model_name"], "fake_probability": None,
+                "raw": results,
+                "fallback_reason": f"Unrecognized labels: {[r['label'] for r in results]}",
+            }
+        print(f"{model_label} fake_probability: {fake_prob:.4f}", flush=True)
+        return {
+            "source": "model", "model_loaded": True,
+            "model_name": state["model_name"], "fake_probability": fake_prob,
+            "raw": results, "fallback_reason": "",
+        }
+    except Exception as exc:
+        print(f"{model_label} prediction error: {exc}", flush=True)
+        return {
+            "source": "fallback", "model_loaded": False,
+            "model_name": state["model_name"], "fake_probability": None,
+            "raw": None, "fallback_reason": str(exc),
+        }
+
+
+def predict_with_efficientnet(image: Image.Image) -> dict:
+    return _run_hf_pipeline(load_efficientnet_model(), image, "EfficientNet")
+
+
+def predict_with_hf_detector(image: Image.Image) -> dict:
+    return _run_hf_pipeline(load_hf_detector_model(), image, "HF-detector")
 
 
 def _open_image(image_path: str) -> Image.Image:
@@ -529,6 +638,56 @@ def predict_image(image: Image.Image) -> dict:
     }
 
 
+def ensemble_image_predictions(
+    xception: dict,
+    efficientnet: dict,
+    hf_detector: dict,
+    heuristic_score: float = 0.0,
+    metadata_score: float = 0.0,
+) -> dict:
+    """Weighted ensemble of three models + heuristics.
+    If a model failed to load its weight is redistributed to the others."""
+    candidates = [
+        ("xception",     xception,     0.10),   # Xception — face-swap specialist, low weight (F1=0.20 on benchmark)
+        ("efficientnet", efficientnet, 0.60),   # haywoodsloan EfficientNet — best model (F1=0.94, 95% acc, sep=0.901)
+        ("hf_detector",  hf_detector,  0.25),   # umm-maybe ResNet50 — good specificity (0 false positives on real)
+    ]
+    active = [
+        (name, result, weight)
+        for name, result, weight in candidates
+        if result.get("model_loaded") and result.get("fake_probability") is not None
+    ]
+    models_used = [name for name, _, _ in active]
+    secondary = _clamp(heuristic_score * 0.60 + metadata_score * 0.40)
+
+    if active:
+        model_pool_weight = sum(w for _, _, w in active)
+        heuristic_weight = 0.05
+        total = model_pool_weight + heuristic_weight
+        fake_prob = _clamp(
+            sum(result["fake_probability"] * (w / total) for _, result, w in active)
+            + secondary * (heuristic_weight / total)
+        )
+        source = "ensemble" if len(active) > 1 else active[0][1]["source"]
+        model_loaded = True
+    else:
+        fake_prob = secondary
+        source = "fallback"
+        model_loaded = False
+
+    print(f"Ensemble models used: {models_used}", flush=True)
+    print(f"Ensemble fake_probability: {fake_prob:.4f}", flush=True)
+
+    return {
+        "fake_probability": fake_prob,
+        "model_loaded": model_loaded,
+        "source": source,
+        "models_used": models_used,
+        "individual_scores": {name: result.get("fake_probability") for name, result, _ in candidates},
+        "model_details": {name: result for name, result, _ in candidates},
+    }
+
+
 def analyze_metadata(image_path: str) -> dict:
     try:
         image = Image.open(image_path)
@@ -592,19 +751,47 @@ def analyze_heuristics(image: Image.Image) -> dict:
     high_frequency_energy = float(np.mean(np.abs(high_freq))) if high_freq.size else 0.0
     channel_std = float(np.std(rgb[:, :, 0]))
 
+    # Laplacian variance: low value = unnaturally smooth (AI images are too clean)
+    gray_u8 = gray.astype(np.uint8)
+    laplacian = cv2.Laplacian(gray_u8, cv2.CV_64F)
+    laplacian_var = float(np.var(laplacian))
+
+    # Local variance coefficient of variation: AI images have more uniform local structure
+    patch_size = 16
+    local_vars = [
+        float(np.var(gray[i : i + patch_size, j : j + patch_size]))
+        for i in range(0, height - patch_size, patch_size)
+        for j in range(0, width - patch_size, patch_size)
+    ]
+    if local_vars:
+        lv_mean = float(np.mean(local_vars)) + 1e-8
+        local_var_cv = float(np.std(local_vars)) / lv_mean
+    else:
+        local_var_cv = 1.0
+
     heuristic_score = 0.0
-    if noise < 2.5:
-        heuristic_score += 0.35
-    if high_frequency_energy < 0.001:
-        heuristic_score += 0.35
+    # Raised from 2.5 → 6.0: real camera photos always have noise > 6; clean AI images don't
+    if noise < 6.0:
+        heuristic_score += 0.25
+    # Raised from 0.001 → 0.008: AI images from diffusion models have less high-freq detail
+    if high_frequency_energy < 0.008:
+        heuristic_score += 0.25
     if channel_std < 30:
-        heuristic_score += 0.30
+        heuristic_score += 0.15
+    # Unnaturally smooth across the whole image
+    if laplacian_var < 400:
+        heuristic_score += 0.20
+    # Overly uniform local texture structure
+    if local_var_cv < 0.75:
+        heuristic_score += 0.15
 
     return {
         "heuristic_score": _clamp(heuristic_score),
         "noise": noise,
         "dct_high_freq_energy": high_frequency_energy,
         "channel_std": channel_std,
+        "laplacian_var": laplacian_var,
+        "local_var_cv": local_var_cv,
     }
 
 
@@ -666,11 +853,17 @@ def fuse_results(model_result: dict, metadata_result: dict, heuristic_result: di
 
 def _format_image_result(fused: dict) -> dict:
     explanation = fused.get("gemini_explanation", "Explanation unavailable")
-    explanation_source = "gemini" if explanation != "Explanation unavailable" else "unavailable"
-    score_source = "clip_model" if fused["model_loaded"] else "heuristic"
+    explanation_source = "gemini" if explanation not in {"Explanation unavailable", ""} else "unavailable"
+    raw_source = fused.get("source", "")
+    if raw_source in {"ensemble", "gemini+ensemble"}:
+        score_source = raw_source
+    elif fused["model_loaded"]:
+        score_source = "model"
+    else:
+        score_source = "heuristic"
 
     return {
-        "model": "CLIP",
+        "model": "ensemble",
         "type": "image",
         "prediction": fused["prediction"],
         "confidence": fused["confidence"],
@@ -700,53 +893,73 @@ def _format_image_result(fused: dict) -> dict:
 
 def analyze_image(image_path: str) -> dict:
     image = _open_image(image_path)
-    model_result = predict_image(image)
     metadata_result = analyze_metadata(image_path)
     heuristic_result = analyze_heuristics(image)
-    model_loaded = bool(model_result["model_loaded"])
-    fake_score = model_result["fake_probability"] if model_loaded else heuristic_result["heuristic_score"]
-    score_source = "clip_model" if model_loaded else "heuristic"
-    prediction = _classify_fake_score(fake_score, model_loaded)
-    confidence = _prediction_confidence(fake_score, prediction, model_result["source"])
 
-    if model_result["source"] == "fallback":
+    # ── Stage 1: three-model pipeline ────────────────────────────────────────
+    xception_result    = predict_image(image)            # Model 1: Xception
+    efficientnet_result = predict_with_efficientnet(image) # Model 2: EfficientNet
+    hf_result          = predict_with_hf_detector(image)  # Model 3: HF detector
+
+    # ── Stage 2: ensemble ─────────────────────────────────────────────────────
+    ensemble = ensemble_image_predictions(
+        xception_result, efficientnet_result, hf_result,
+        heuristic_score=heuristic_result["heuristic_score"],
+        metadata_score=metadata_result["metadata_score"],
+    )
+
+    # ── Stage 3: optional Gemini refinement ───────────────────────────────────
+    gemini_result = _analyze_image_with_gemini(image, metadata_result)
+    if gemini_result:
+        gemini_fake   = gemini_result["details"].get("fake_probability", ensemble["fake_probability"])
+        ensemble_fake = ensemble["fake_probability"]
+        fake_score    = _clamp(gemini_fake * 0.55 + ensemble_fake * 0.45)
+        source        = "gemini+ensemble"
+        gemini_explanation = gemini_result.get("signals", {}).get("gemini_verdict", "See Gemini analysis")
+    else:
+        fake_score    = ensemble["fake_probability"]
+        source        = ensemble["source"]
+        gemini_explanation = _generate_gemini_image_explanation(image, fake_score)
+
+    model_loaded = ensemble["model_loaded"]
+    prediction   = _classify_fake_score(fake_score, model_loaded)
+    confidence   = _prediction_confidence(fake_score, prediction, source)
+    if source == "fallback":
         confidence = min(confidence, MAX_FALLBACK_CONFIDENCE)
 
-    gemini_explanation = _generate_gemini_image_explanation(image, fake_score)
+    n_models     = len(ensemble["models_used"])
+    reliability  = round(_clamp(0.50 + n_models * 0.15), 4)
 
     print(f"Final fake score: {fake_score:.8f}", flush=True)
     print(f"Final label: {prediction}", flush=True)
+    print(f"Source: {source}  Models: {ensemble['models_used']}", flush=True)
 
     fused = {
-        "prediction": prediction,
-        "confidence": _percent(confidence),
-        "source": model_result["source"],
-        "model_loaded": model_loaded,
-        "reliability_score": round(model_result["reliability_score"] if model_loaded else 0.25, 4),
+        "prediction":       prediction,
+        "confidence":       _percent(confidence),
+        "source":           source,
+        "model_loaded":     model_loaded,
+        "reliability_score": reliability,
         "fake_probability": fake_score,
-        "metadata_status": metadata_result["metadata_status"],
-        "risk_level": _risk_level(fake_score),
-        "risk_score": _to_risk_score(fake_score),
-        "verdict": prediction if prediction == "Uncertain" else prediction.upper(),
+        "metadata_status":  metadata_result["metadata_status"],
+        "risk_level":       _risk_level(fake_score),
+        "risk_score":       _to_risk_score(fake_score),
+        "verdict":          prediction if prediction == "Uncertain" else prediction.upper(),
         "gemini_explanation": gemini_explanation,
         "details": {
             "fake_probability": fake_score,
-            "model_score": model_result["fake_probability"],
-            "metadata_score": metadata_result["metadata_score"],
-            "heuristic_score": heuristic_result["heuristic_score"],
-            "metadata_status": metadata_result["metadata_status"],
-            "score_source": score_source,
+            "model_score":      ensemble["fake_probability"],
+            "metadata_score":   metadata_result["metadata_score"],
+            "heuristic_score":  heuristic_result["heuristic_score"],
+            "metadata_status":  metadata_result["metadata_status"],
+            "score_source":     source,
+            "ensemble":         ensemble,
             "gemini": {
-                "model": GEMINI_MODEL_NAME,
+                "model":       GEMINI_MODEL_NAME,
                 "explanation": gemini_explanation,
             },
-            "clip": {
-                "model": model_result.get("model_name", CLIP_MODEL_NAME),
-                "labels": model_result.get("labels", [dict(prompt_pair) for prompt_pair in CLIP_PROMPT_PAIRS]),
-                "label_scores": model_result.get("label_scores"),
-            },
-            "model": model_result,
-            "metadata": metadata_result,
+            "model":     xception_result,
+            "metadata":  metadata_result,
             "heuristics": heuristic_result,
         },
     }

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 from report import generate_report
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
 try:
     import firebase_admin
