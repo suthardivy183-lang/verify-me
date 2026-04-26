@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
-from backend.report import generate_report
+from report import generate_report
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
@@ -71,7 +71,7 @@ async def verify(
         with open(tmp_path, "wb") as tmp_file:
             shutil.copyfileobj(file.file, tmp_file)
 
-        from backend.detector import analyze_document, analyze_image, analyze_video
+        from detector import analyze_document, analyze_image, analyze_video
 
         try:
             normalized_asset_type = asset_type.strip().lower()
