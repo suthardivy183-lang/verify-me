@@ -20,7 +20,7 @@ window.DashboardPage = function DashboardPage() {
     HistoryIcon,
     ShieldIcon,
     FileIcon,
-  } = window.VerifyMeUI;
+  } = window.AsliUI;
 
   const [items, setItems] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -482,7 +482,7 @@ window.DashboardPage = function DashboardPage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-300">{formatDateOnly(item.timestamp)}</td>
                     <td className="px-6 py-4 text-right">
-                      <DownloadButton verificationId={item.verification_id} onClick={window.VerifyMeUI.downloadReport} />
+                      <DownloadButton verificationId={item.verification_id} onClick={window.AsliUI.downloadReport} />
                     </td>
                   </tr>
                 );

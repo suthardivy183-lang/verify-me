@@ -16,7 +16,7 @@ window.VerifyPage = function VerifyPage() {
     RiskBadge,
     UploadIcon,
     FileIcon,
-  } = window.VerifyMeUI;
+  } = window.AsliUI;
 
   const [selectedFile, setSelectedFile] = React.useState(null);
   const [assetType, setAssetType] = React.useState("photo");

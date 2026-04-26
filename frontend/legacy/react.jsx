@@ -338,7 +338,7 @@ export default function App() {
   return (
     <div style={styles.app}>
       <nav style={styles.nav}>
-        <div style={styles.logo}>VerifyMe</div>
+        <div style={styles.logo}>Asli</div>
 
         <div style={styles.navLinks}>
           <button

@@ -5,7 +5,7 @@ const {
   Cell,
 } = window.Recharts || {};
 
-window.VerifyMeUI = (() => {
+window.AsliUI = (() => {
   const API_BASE = "http://localhost:8000";
   const ORG_ID = "demo_org";
   const REPORTS_DOWNLOADED = 184;

@@ -89,7 +89,7 @@ Respond ONLY in this exact JSON format with no extra text:
 }"""
 
 if not os.getenv("GEMINI_API_KEY"):
-    print("[VerifyMe] WARNING: GEMINI_API_KEY not set. Running in heuristic fallback mode.", flush=True)
+    print("[Asli] WARNING: GEMINI_API_KEY not set. Running in heuristic fallback mode.", flush=True)
 
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
@@ -172,7 +172,7 @@ def _prediction_confidence(fake_score: float, prediction: str, source: str) -> f
 
 
 def _log_gemini_error(error: Exception) -> None:
-    print(f"[VerifyMe Gemini Error] {error}", flush=True)
+    print(f"[Asli Gemini Error] {error}", flush=True)
 
 
 @lru_cache(maxsize=1)

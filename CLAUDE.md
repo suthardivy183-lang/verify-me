@@ -1,4 +1,4 @@
-# VerifyMe — Session Notes for Claude
+# Asli — Session Notes for Claude
 
 ## Project Overview
 
@@ -8,7 +8,7 @@ Stack: Python 3.11, FastAPI, TensorFlow/Keras, PyTorch, HuggingFace Transformers
 ## Project Structure
 
 ```
-verifyme/
+asli/
 ├── backend/           ← all Python server code
 │   ├── main.py        ← FastAPI app + routes
 │   ├── detector.py    ← detection logic (models, ensemble, heuristics, Gemini)
@@ -87,8 +87,8 @@ Also fixed a crash: `cv2.Laplacian` on float32 gray image fails with `CV_64F`. F
 
 `.env` had `IMAGE_MODEL_PATH=models/xception_5o.h5` but the file lives at the project root.
 After reorganization the correct absolute path is:
-`IMAGE_MODEL_PATH=/Users/suthardivydevendrabhai/Desktop/verifyme/models/xception_5o.h5`
-`FIREBASE_KEY_PATH=/Users/suthardivydevendrabhai/Desktop/verifyme/firebasekey.json`
+`IMAGE_MODEL_PATH=/Users/suthardivydevendrabhai/Desktop/asli/models/xception_5o.h5`
+`FIREBASE_KEY_PATH=/Users/suthardivydevendrabhai/Desktop/asli/firebasekey.json`
 
 `main.py` loads `.env` from the project root using:
 `load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))`

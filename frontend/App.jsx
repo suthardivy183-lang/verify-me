@@ -16,7 +16,7 @@ function AppShell() {
     SettingsIcon,
     MenuIcon,
     CloseIcon,
-  } = window.VerifyMeUI;
+  } = window.AsliUI;
 
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
@@ -37,7 +37,7 @@ function AppShell() {
               <ShieldIcon className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-lg font-semibold tracking-tight text-white">VerifyMe</p>
+              <p className="text-lg font-semibold tracking-tight text-white">Asli</p>
               <p className="text-xs tracking-[0.2em] text-muted">Trust Engine</p>
             </div>
           </div>
@@ -100,7 +100,7 @@ function AppShell() {
                 <ShieldIcon className="h-5 w-5" />
               </div>
               <div>
-                <p className="font-bold text-white">VerifyMe</p>
+                <p className="font-bold text-white">Asli</p>
                 <p className="text-xs text-muted">Command Center</p>
               </div>
             </div>
@@ -166,7 +166,7 @@ function bootstrapApp(attempt = 0) {
     typeof React !== "undefined" &&
     typeof ReactDOM !== "undefined" &&
     typeof ReactRouterDOM !== "undefined" &&
-    window.VerifyMeUI &&
+    window.AsliUI &&
     window.DashboardPage &&
     window.VerifyPage &&
     window.HistoryPage;

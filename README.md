@@ -1,6 +1,6 @@
-# VerifyMe
+# Asli
 
-VerifyMe is now organized into a clearer full-stack layout with separate `frontend` and `backend` folders.
+Asli is now organized into a clearer full-stack layout with separate `frontend` and `backend` folders.
 
 ## Structure
 

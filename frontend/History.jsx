@@ -14,7 +14,7 @@ window.HistoryPage = function HistoryPage() {
     DownloadButton,
     VerdictBadge,
     SearchIcon,
-  } = window.VerifyMeUI;
+  } = window.AsliUI;
 
   const [items, setItems] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -136,7 +136,7 @@ window.HistoryPage = function HistoryPage() {
                       <td className="px-6 py-4 text-sm text-white">{confidence}%</td>
                       <td className="px-6 py-4 text-sm text-muted">{formatDateTime(item.timestamp)}</td>
                       <td className="px-6 py-4 text-right">
-                        <DownloadButton verificationId={item.verification_id} onClick={window.VerifyMeUI.downloadReport} />
+                        <DownloadButton verificationId={item.verification_id} onClick={window.AsliUI.downloadReport} />
                       </td>
                     </tr>
                   );
