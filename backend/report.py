@@ -12,6 +12,12 @@ def generate_report(data: dict) -> str:
     signals = data.get("signals", {}) or {}
     asset_type = data.get("asset_type", "")
     timestamp = data.get("timestamp", "")
+    source = data.get("source", "")
+    details = data.get("details", {}) or {}
+    gemini_details = details.get("gemini", {}) if isinstance(details, dict) else {}
+    model_name = gemini_details.get("model") or (
+        "custom-model" if source == "model" else "heuristic-fallback" if source == "fallback" else ""
+    )
 
     file_path = f"/tmp/{verification_id}.pdf"
     pdf = canvas.Canvas(file_path, pagesize=A4)
@@ -32,6 +38,8 @@ def generate_report(data: dict) -> str:
         ("Org", org_id),
         ("Date", timestamp),
         ("Asset type", asset_type),
+        ("Detection source", source or "unknown"),
+        ("Model", model_name or "not reported"),
     ]
     label_x = margin
     value_x = margin + 140
