@@ -1,14 +1,16 @@
 import os
 import shutil
+import tempfile
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
-from report import generate_report
+from backend.report import generate_report
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
@@ -25,10 +27,12 @@ except ImportError:
 
 
 local_verifications = {}
+BASE_DIR = Path(__file__).resolve().parent
 
 if firebase_enabled:
     try:
-        cred = credentials.Certificate(os.getenv("FIREBASE_KEY_PATH", "firebasekey.json"))
+        default_key_path = BASE_DIR / "firebasekey.json"
+        cred = credentials.Certificate(os.getenv("FIREBASE_KEY_PATH", str(default_key_path)))
         firebase_admin.initialize_app(cred)
         db = firestore.client()
     except Exception as exc:
@@ -61,13 +65,13 @@ async def verify(
     org_id: str = Form("demo_org"),
 ):
     extension = os.path.splitext(file.filename or "")[1]
-    tmp_path = os.path.join("/tmp", f"{uuid.uuid4()}{extension}")
+    tmp_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}{extension}")
 
     try:
         with open(tmp_path, "wb") as tmp_file:
             shutil.copyfileobj(file.file, tmp_file)
 
-        from detector import analyze_document, analyze_image, analyze_video
+        from backend.detector import analyze_document, analyze_image, analyze_video
 
         try:
             normalized_asset_type = asset_type.strip().lower()

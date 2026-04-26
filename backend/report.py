@@ -26,7 +26,7 @@ def generate_report(data: dict) -> str:
     y = height - margin
 
     pdf.setFont("Helvetica-Bold", 18)
-    pdf.drawString(margin, y, "VerifyMe — Identity Verification Report")
+    pdf.drawString(margin, y, "VerifyMe - Identity Verification Report")
     y -= 18
 
     pdf.setStrokeColor(colors.black)
