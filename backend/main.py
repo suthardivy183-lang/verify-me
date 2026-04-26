@@ -1,23 +1,33 @@
+import contextvars
+import hashlib
+import json
 import os
+import re
 import shutil
 import tempfile
+import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from dotenv import load_dotenv
 
 from report import generate_report
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
+APP_VERSION = "0.2.0"
+START_TIME = time.time()
+
+
+# ───────────────────────── Firebase init ─────────────────────────
+
 try:
     import firebase_admin
     from firebase_admin import credentials, firestore
-
     firebase_enabled = True
 except ImportError:
     firebase_admin = None
@@ -46,24 +56,227 @@ else:
     print("Firebase disabled - running locally")
 
 
-app = FastAPI()
+# ───────────────────────── FastAPI app + OpenAPI metadata ─────────────────────────
+
+app = FastAPI(
+    title="Asli API",
+    description=(
+        "Multilingual AI-content authenticity verification.\n\n"
+        "Detects AI-generated and manipulated images, then explains the verdict "
+        "in plain language across English, Hindi, and Gujarati. Built for the "
+        "Google Solution Challenge 2026."
+    ),
+    version=APP_VERSION,
+    contact={"name": "Asli Team"},
+)
+
+
+# ───────────────────────── CORS ─────────────────────────
+
+# CORS policy:
+#   - Dev default (ALLOWED_ORIGINS unset or "*"): permissive — allow any origin
+#     including null (file:// loads) and any localhost port.
+#   - Prod: set ALLOWED_ORIGINS to a comma-separated list of explicit origins,
+#     or use ALLOWED_ORIGIN_REGEX for wildcard patterns like *.run.app.
+env_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
+env_regex = os.getenv("ALLOWED_ORIGIN_REGEX", "").strip()
+
+if not env_origins or env_origins == "*":
+    cors_origins = ["*"]
+    cors_origin_regex = None
+    # When using "*", credentials cannot also be true per the CORS spec.
+    cors_allow_credentials = False
+else:
+    cors_origins = [o.strip() for o in env_origins.split(",") if o.strip()]
+    cors_origin_regex = env_regex or None
+    cors_allow_credentials = True
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
+    allow_credentials=cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-@app.post("/api/verify")
+# ───────────────────────── structured JSON logging middleware ─────────────────────────
+
+# Per-request bag of extra fields handlers can populate (read by middleware on exit).
+_log_extras: contextvars.ContextVar = contextvars.ContextVar("asli_log_extras", default=None)
+
+
+def set_log_extras(**kwargs) -> None:
+    """Handlers call this to enrich the access log entry for the current request."""
+    bag = _log_extras.get()
+    if bag is None:
+        return
+    bag.update({k: v for k, v in kwargs.items() if v is not None})
+
+
+@app.middleware("http")
+async def structured_logging_middleware(request: Request, call_next):
+    bag: dict = {}
+    token = _log_extras.set(bag)
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    finally:
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        _log_extras.reset(token)
+
+    log_entry = {
+        "severity": "INFO",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "latency_ms": latency_ms,
+        **bag,
+    }
+    print(json.dumps(log_entry, default=str), flush=True)
+    return response
+
+
+# ───────────────────────── /healthz (Cloud Run health check) ─────────────────────────
+
+@app.get(
+    "/healthz",
+    summary="Liveness check for Cloud Run",
+    response_description="Service status with version and uptime",
+    tags=["meta"],
+)
+async def healthz():
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "uptime_seconds": int(time.time() - START_TIME),
+    }
+
+
+# ───────────────────────── /scan (new structured endpoint) ─────────────────────────
+
+_SCAN_EXAMPLE_RESPONSE = {
+    "verdict": "Nakli",
+    "confidence_pct": 88,
+    "explanation_en": (
+        "The image's skin texture is unnaturally smooth with no visible pores, "
+        "and the earring shapes differ between left and right ears. Background "
+        "depth-of-field is inconsistent. These artifacts, combined with the "
+        "ensemble's high fake_probability, indicate an AI-generated image."
+    ),
+    "explanation_local": (
+        "तस्वीर की त्वचा की बनावट अप्राकृतिक रूप से चिकनी है (pores नहीं दिख रहे), "
+        "और दोनों कानों की earrings अलग-अलग हैं। पृष्ठभूमि की depth-of-field असंगत है। "
+        "ये संकेत AI-जनित तस्वीर की पुष्टि करते हैं।"
+    ),
+    "red_flags": [
+        "skin lacks visible pores",
+        "earrings asymmetric between ears",
+        "inconsistent background depth-of-field",
+    ],
+    "learn_more_tip": (
+        "WhatsApp या social media से आई किसी भी तस्वीर पर भरोसा करने से पहले "
+        "उसका स्रोत खोजें (Google reverse image search) और चेहरे/हाथों की बारीक डिटेल पर ध्यान दें।"
+    ),
+    "source": "gemini",
+    "cache_hit": False,
+}
+
+
+@app.post(
+    "/scan",
+    summary="Verify an image and return a multilingual explanation",
+    description=(
+        "Analyzes an uploaded image with a 3-model ensemble + heuristics, then "
+        "uses Gemini (with a deterministic template fallback) to produce a plain-"
+        "language explanation in English plus the requested target language. "
+        "Stateless — does not write to Firestore."
+    ),
+    tags=["scan"],
+    responses={
+        200: {
+            "description": "Structured verdict + multilingual explanation",
+            "content": {"application/json": {"example": _SCAN_EXAMPLE_RESPONSE}},
+        },
+        400: {"description": "Invalid image or unsupported language"},
+        500: {"description": "Internal analysis error"},
+    },
+)
+async def scan(
+    image: UploadFile = File(..., description="Image file (JPEG/PNG)"),
+    target_language: str = Form("hi", description="Output language: 'hi' | 'gu' | 'en'"),
+    user_context: str = Form(None, description='Optional context, e.g. "received via WhatsApp"'),
+):
+    raw_bytes = await image.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Empty image upload")
+
+    image_hash_full = hashlib.sha256(raw_bytes).hexdigest()
+    image_hash = image_hash_full[:12]
+
+    normalized_language = (target_language or "hi").strip().lower()
+    if normalized_language not in {"hi", "gu", "en"}:
+        normalized_language = "hi"
+
+    extension = os.path.splitext(image.filename or "")[1] or ".jpg"
+    tmp_path = os.path.join(tempfile.gettempdir(), f"scan_{uuid.uuid4().hex}{extension}")
+
+    try:
+        with open(tmp_path, "wb") as fh:
+            fh.write(raw_bytes)
+
+        from detector import analyze_image
+
+        try:
+            result = analyze_image(tmp_path, target_language=normalized_language)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        explanation = result.get("explanation") or {}
+        if user_context:
+            explanation["user_context"] = user_context.strip()[:500]
+
+        set_log_extras(
+            image_hash=image_hash,
+            verdict=explanation.get("verdict"),
+            cache_hit=bool(explanation.get("cache_hit")),
+            gemini_used=(explanation.get("source") == "gemini"),
+            target_language=normalized_language,
+            has_user_context=bool(user_context),
+        )
+
+        return JSONResponse(content=explanation)
+    finally:
+        try:
+            await image.close()
+        except Exception:
+            pass
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+# ───────────────────────── legacy /api/verify (deprecated) ─────────────────────────
+
+@app.post(
+    "/api/verify",
+    summary="Legacy verification endpoint (deprecated, use /scan)",
+    deprecated=True,
+    tags=["legacy"],
+)
 async def verify(
+    response: Response,
     file: UploadFile = File(...),
     asset_type: str = Form(...),
     candidate_id: str = Form(""),
     org_id: str = Form("demo_org"),
+    target_language: str = Form("hi"),
 ):
+    response.headers["X-Deprecated"] = "Use /scan instead"
+
     extension = os.path.splitext(file.filename or "")[1]
     tmp_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}{extension}")
 
@@ -75,11 +288,14 @@ async def verify(
 
         try:
             normalized_asset_type = asset_type.strip().lower()
+            normalized_language = (target_language or "hi").strip().lower()
+            if normalized_language not in {"hi", "gu", "en"}:
+                normalized_language = "hi"
 
             if normalized_asset_type == "video":
                 result = analyze_video(tmp_path)
             elif normalized_asset_type in {"image", "photo"}:
-                result = analyze_image(tmp_path)
+                result = analyze_image(tmp_path, target_language=normalized_language)
             elif normalized_asset_type == "document":
                 result = analyze_document(tmp_path)
             else:
@@ -108,6 +324,15 @@ async def verify(
             verification_id = uuid.uuid4().hex
             local_verifications[verification_id] = document
 
+        explanation = result.get("explanation") or {}
+        set_log_extras(
+            verdict=explanation.get("verdict"),
+            cache_hit=bool(explanation.get("cache_hit")),
+            gemini_used=(explanation.get("source") == "gemini"),
+            target_language=normalized_language,
+            asset_type=result["type"],
+        )
+
         return {
             "verification_id": verification_id,
             "type": result["type"],
@@ -122,6 +347,7 @@ async def verify(
             "risk_score": result["risk_score"],
             "verdict": result["verdict"],
             "signals": result["signals"],
+            "explanation": explanation,
             "asset_type": result["type"],
             "candidate_id": candidate_id,
         }
@@ -131,13 +357,12 @@ async def verify(
             os.remove(tmp_path)
 
 
-@app.get("/api/verifications")
+@app.get("/api/verifications", tags=["legacy"])
 async def verifications(org_id: str = Query(...)):
     records = []
 
     if firebase_enabled:
         docs = db.collection("verifications").where("org_id", "==", org_id).stream()
-
         for doc in docs:
             record = doc.to_dict()
             record["verification_id"] = doc.id
@@ -152,13 +377,12 @@ async def verifications(org_id: str = Query(...)):
     return records[:50]
 
 
-@app.get("/api/report/{verification_id}")
+@app.get("/api/report/{verification_id}", tags=["legacy"])
 async def report(verification_id: str):
     if firebase_enabled:
         doc = db.collection("verifications").document(verification_id).get()
         if not doc.exists:
             raise HTTPException(status_code=404, detail="Verification not found")
-
         data = doc.to_dict()
         data["verification_id"] = verification_id
     else:
@@ -176,12 +400,11 @@ async def report(verification_id: str):
     )
 
 
-@app.get("/api/ping")
+@app.get("/api/ping", tags=["legacy"])
 async def ping():
     return {"status": "ok"}
 
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

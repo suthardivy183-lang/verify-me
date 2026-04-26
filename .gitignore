@@ -1,8 +1,36 @@
-myenv/
+# Secrets & credentials
+.env
+*.env.*
 firebasekey.json
 serviceAccountKey.json
+
+# Python
+myenv/
+.venv/
+venv/
 __pycache__/
 *.pyc
-.DS_Store
-.env
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ML model weights (large binaries — download separately)
 *.h5
+*.pt
+*.pth
+*.onnx
+*.bin
+models/*.h5
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

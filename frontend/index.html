@@ -1,1091 +1,241 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="hi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Asli | AI Identity Verification</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#FAFAF9" />
+  <title>Asli — असली या नक़ली? · AI Image Verification</title>
+  <meta name="description" content="Detect AI-generated and manipulated images. Plain-language explanations in Hindi, Gujarati, or English. Free." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+
+  <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Tailwind CDN with brand-colour config -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <style>
-    :root {
-      --bg: #0a0a0f;
-      --surface: #12121a;
-      --border: #1e1e2e;
-      --accent: #3b82f6;
-      --violet: #7c3aed;
-      --real: #22c55e;
-      --fake: #ef4444;
-      --uncertain: #f59e0b;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    html {
-      scroll-behavior: smooth;
-    }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background:
-        radial-gradient(circle at 20% 0%, rgba(59, 130, 246, 0.18), transparent 30%),
-        radial-gradient(circle at 80% 10%, rgba(124, 58, 237, 0.18), transparent 28%),
-        linear-gradient(135deg, #0a0a0f 0%, #0e0e16 50%, #090912 100%);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      overflow-x: hidden;
-    }
-
-    button,
-    input,
-    select {
-      font: inherit;
-    }
-
-    button,
-    label,
-    select {
-      transition: transform 300ms ease, opacity 300ms ease, filter 300ms ease, border-color 300ms ease, background 300ms ease, color 300ms ease, box-shadow 300ms ease;
-    }
-
-    .glass-card {
-      background: rgba(18, 18, 26, 0.74);
-      border: 1px solid rgba(30, 30, 46, 0.95);
-      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-    }
-
-    .upload-zone {
-      position: relative;
-      isolation: isolate;
-      overflow: hidden;
-    }
-
-    .upload-zone::before {
-      content: "";
-      position: absolute;
-      inset: -2px;
-      z-index: -1;
-      border-radius: 28px;
-      background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.8), rgba(124, 58, 237, 0.75), transparent);
-      background-size: 220% 100%;
-      opacity: 0.22;
-      animation: dashGlow 4s linear infinite;
-    }
-
-    .upload-zone.dragging::before,
-    .upload-zone:hover::before {
-      opacity: 0.75;
-    }
-
-    .upload-zone.dragging {
-      border-color: rgba(59, 130, 246, 0.95);
-      background: rgba(59, 130, 246, 0.1);
-      box-shadow: 0 0 42px rgba(59, 130, 246, 0.14);
-    }
-
-    .gradient-button {
-      background: linear-gradient(135deg, var(--accent), var(--violet));
-      box-shadow: 0 18px 46px rgba(59, 130, 246, 0.22);
-    }
-
-    .gradient-button:hover:not(:disabled) {
-      transform: scale(1.02);
-      filter: brightness(1.12);
-      box-shadow: 0 22px 60px rgba(124, 58, 237, 0.28);
-    }
-
-    .outline-button:hover {
-      transform: translateY(-1px);
-      border-color: rgba(59, 130, 246, 0.7);
-      background: rgba(59, 130, 246, 0.1);
-      color: #dbeafe;
-    }
-
-    .tab-underline {
-      position: absolute;
-      bottom: -1px;
-      height: 2px;
-      width: 50%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, var(--accent), var(--violet));
-      transition: transform 300ms ease;
-    }
-
-    .result-enter {
-      animation: slideInRight 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
-    }
-
-    .toast-enter {
-      animation: toastIn 300ms ease both;
-    }
-
-    .skeleton {
-      position: relative;
-      overflow: hidden;
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    .skeleton::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      transform: translateX(-100%);
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
-      animation: shimmer 1.4s infinite;
-    }
-
-    .spin {
-      animation: spin 800ms linear infinite;
-    }
-
-    @keyframes dashGlow {
-      from {
-        background-position: 0% 50%;
-      }
-      to {
-        background-position: 220% 50%;
-      }
-    }
-
-    @keyframes slideInRight {
-      from {
-        opacity: 0;
-        transform: translateX(34px);
-      }
-      to {
-        opacity: 1;
-        transform: translateX(0);
-      }
-    }
-
-    @keyframes toastIn {
-      from {
-        opacity: 0;
-        transform: translate(18px, -12px);
-      }
-      to {
-        opacity: 1;
-        transform: translate(0, 0);
-      }
-    }
-
-    @keyframes shimmer {
-      100% {
-        transform: translateX(100%);
-      }
-    }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-  </style>
-</head>
-<body>
-  <div id="root"></div>
-
-  <script type="text/babel">
-    const { useEffect, useState } = React;
-
-    const API_BASE = "http://127.0.0.1:8000";
-    const ORG_ID = "demo_org";
-    const MAX_FILE_SIZE = 50 * 1024 * 1024;
-
-    function App() {
-      const [activeView, setActiveView] = useState("verify");
-      const [selectedFile, setSelectedFile] = useState(null);
-      const [candidateId, setCandidateId] = useState("");
-      const [assetType, setAssetType] = useState("Image");
-      const [isDragging, setIsDragging] = useState(false);
-      const [isVerifying, setIsVerifying] = useState(false);
-      const [result, setResult] = useState(null);
-      const [history, setHistory] = useState([]);
-      const [historyLoading, setHistoryLoading] = useState(false);
-      const [toasts, setToasts] = useState([]);
-      const [metricAnimationKey, setMetricAnimationKey] = useState(0);
-
-      // History view data loading.
-      useEffect(() => {
-        if (activeView !== "history") return;
-
-        let isMounted = true;
-
-        async function fetchHistory() {
-          setHistoryLoading(true);
-
-          try {
-            const response = await fetch(`${API_BASE}/api/verifications?org_id=${ORG_ID}`);
-            const data = await parseApiResponse(response, "Unable to load verification history.");
-
-            if (isMounted) {
-              setHistory(Array.isArray(data) ? data : []);
-            }
-          } catch (error) {
-            if (isMounted) {
-              showToast(error.message || "Network error while loading history.", "error");
-              setHistory([]);
-            }
-          } finally {
-            if (isMounted) {
-              setHistoryLoading(false);
-            }
-          }
-        }
-
-        fetchHistory();
-
-        return () => {
-          isMounted = false;
-        };
-      }, [activeView]);
-
-      // Result metric animation trigger.
-      useEffect(() => {
-        if (!result) return;
-        const frame = window.requestAnimationFrame(() => {
-          setMetricAnimationKey((key) => key + 1);
-        });
-        return () => window.cancelAnimationFrame(frame);
-      }, [result]);
-
-      // Toast auto-dismiss lifecycle.
-      useEffect(() => {
-        if (!toasts.length) return;
-
-        const timer = window.setTimeout(() => {
-          setToasts((items) => items.slice(1));
-        }, 4000);
-
-        return () => window.clearTimeout(timer);
-      }, [toasts]);
-
-      function showToast(message, type = "error") {
-        const id = `${Date.now()}-${Math.random()}`;
-        setToasts((items) => [...items, { id, message, type }]);
-      }
-
-      function selectFile(file) {
-        if (!file) return;
-
-        if (file.size > MAX_FILE_SIZE) {
-          showToast("File too large. Please upload a file under 50MB.", "warning");
-          return;
-        }
-
-        setSelectedFile(file);
-      }
-
-      function handleFileInput(event) {
-        selectFile(event.target.files && event.target.files[0]);
-        event.target.value = "";
-      }
-
-      function handleDrop(event) {
-        event.preventDefault();
-        setIsDragging(false);
-        selectFile(event.dataTransfer.files && event.dataTransfer.files[0]);
-      }
-
-      async function runVerification() {
-        if (!selectedFile) {
-          showToast("Choose a file before running verification.", "warning");
-          return;
-        }
-
-        setIsVerifying(true);
-
-        const formData = new FormData();
-        formData.append("file", selectedFile);
-        formData.append("asset_type", assetType.toLowerCase());
-        formData.append("candidate_id", candidateId.trim());
-        formData.append("org_id", ORG_ID);
-
-        try {
-          const response = await fetch(`${API_BASE}/api/verify`, {
-            method: "POST",
-            body: formData,
-          });
-          const data = await parseApiResponse(response, "Verification failed.");
-          setResult({ ...data, timestamp: data.timestamp || new Date().toISOString() });
-        } catch (error) {
-          showToast(error.message || "Network error while running verification.", "error");
-        } finally {
-          setIsVerifying(false);
-        }
-      }
-
-      async function downloadReport(verificationId) {
-        if (!verificationId) {
-          showToast("Report is unavailable for this verification.", "warning");
-          return;
-        }
-
-        try {
-          const response = await fetch(`${API_BASE}/api/report/${verificationId}`);
-
-          if (!response.ok) {
-            await parseApiResponse(response, "Unable to download report.");
-          }
-
-          const blob = await response.blob();
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = `${verificationId}.pdf`;
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          window.URL.revokeObjectURL(url);
-        } catch (error) {
-          showToast(error.message || "Network error while downloading report.", "error");
-        }
-      }
-
-      return (
-        <div className="min-h-screen text-slate-50">
-          <DecorativeBackground />
-          <ToastStack toasts={toasts} />
-
-          {/* Top navigation */}
-          <header className="sticky top-0 z-30 border-b border-[#1e1e2e] bg-[#0a0a0f]/78 backdrop-blur-xl">
-            <nav className="mx-auto flex h-20 w-full max-w-7xl items-center justify-between px-5 sm:px-8">
-              <div className="flex items-center gap-3">
-                <ShieldLogo className="h-10 w-10" />
-                <div>
-                  <div className="text-xl font-black tracking-tight">Asli</div>
-                  <div className="hidden text-xs font-semibold uppercase tracking-[0.28em] text-slate-500 sm:block">Identity Intelligence</div>
-                </div>
-              </div>
-
-              <div className="relative grid w-44 grid-cols-2 rounded-full border border-[#1e1e2e] bg-white/[0.03] p-1">
-                <span className="tab-underline" style={{ transform: activeView === "verify" ? "translateX(0%)" : "translateX(100%)" }} />
-                {["verify", "history"].map((view) => (
-                  <button
-                    key={view}
-                    type="button"
-                    onClick={() => setActiveView(view)}
-                    className={`relative z-10 rounded-full px-4 py-2 text-sm font-bold capitalize ${activeView === view ? "text-white" : "text-slate-500 hover:text-slate-200"}`}
-                  >
-                    {view}
-                  </button>
-                ))}
-              </div>
-            </nav>
-          </header>
-
-          <main className="relative z-10 mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:py-12">
-            {activeView === "verify" ? (
-              <VerifyView
-                selectedFile={selectedFile}
-                candidateId={candidateId}
-                assetType={assetType}
-                isDragging={isDragging}
-                isVerifying={isVerifying}
-                result={result}
-                metricAnimationKey={metricAnimationKey}
-                setCandidateId={setCandidateId}
-                setAssetType={setAssetType}
-                setIsDragging={setIsDragging}
-                handleFileInput={handleFileInput}
-                handleDrop={handleDrop}
-                runVerification={runVerification}
-                downloadReport={downloadReport}
-              />
-            ) : (
-              <HistoryView
-                history={history}
-                historyLoading={historyLoading}
-                downloadReport={downloadReport}
-              />
-            )}
-          </main>
-        </div>
-      );
-    }
-
-    // Verify page layout and controls.
-    function VerifyView(props) {
-      const {
-        selectedFile,
-        candidateId,
-        assetType,
-        isDragging,
-        isVerifying,
-        result,
-        metricAnimationKey,
-        setCandidateId,
-        setAssetType,
-        setIsDragging,
-        handleFileInput,
-        handleDrop,
-        runVerification,
-        downloadReport,
-      } = props;
-
-      return (
-        <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-          <div className="glass-card rounded-[2rem] p-5 sm:p-7 lg:p-8">
-            <div className="mb-7">
-              <p className="mb-2 text-sm font-bold uppercase tracking-[0.28em] text-blue-300/80">Verify Asset</p>
-              <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">AI-powered proof in seconds.</h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">Upload an identity asset, attach a candidate ID, and receive a risk-ranked verification profile.</p>
-            </div>
-
-            <label
-              className={`upload-zone ${isDragging ? "dragging" : ""} block cursor-pointer rounded-[1.75rem] border-2 border-dashed border-[#1e1e2e] bg-white/[0.035] p-8 text-center sm:p-10`}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={handleDrop}
-            >
-              <input
-                className="hidden"
-                type="file"
-                accept="image/*,video/*,.pdf,.doc,.docx,.txt,.rtf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={handleFileInput}
-              />
-
-              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-3xl border border-white/10 bg-white/[0.05] text-blue-300">
-                {selectedFile ? <FileTypeIcon file={selectedFile} className="h-8 w-8" /> : <UploadIcon className="h-8 w-8" />}
-              </div>
-
-              {selectedFile ? (
-                <div>
-                  <p className="break-words text-lg font-extrabold text-white">{selectedFile.name}</p>
-                  <p className="mt-2 text-sm text-slate-400">{formatFileSize(selectedFile.size)} - {selectedFile.type || "Unknown type"}</p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-lg font-extrabold text-white">Drop your file here or click to browse</p>
-                  <p className="mt-2 text-sm text-slate-400">Accepted formats: Images, Videos, Documents</p>
-                </div>
-              )}
-            </label>
-
-            <div className="mt-6 grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-300">Candidate ID</span>
-                <input
-                  value={candidateId}
-                  onChange={(event) => setCandidateId(event.target.value)}
-                  placeholder="e.g. CAND-2048"
-                  className="w-full rounded-2xl border border-[#1e1e2e] bg-[#0f0f16] px-4 py-3.5 text-white outline-none transition duration-300 ease-in-out placeholder:text-slate-600 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-300">Asset Type</span>
-                <div className="relative">
-                  <select
-                    value={assetType}
-                    onChange={(event) => setAssetType(event.target.value)}
-                    className="w-full appearance-none rounded-2xl border border-[#1e1e2e] bg-[#0f0f16] px-4 py-3.5 pr-11 text-white outline-none transition duration-300 ease-in-out focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                  >
-                    <option>Image</option>
-                    <option>Video</option>
-                    <option>Document</option>
-                    <option>Photo</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
-                </div>
-              </label>
-            </div>
-
-            <button
-              type="button"
-              disabled={isVerifying}
-              onClick={runVerification}
-              className="gradient-button mt-6 flex w-full items-center justify-center gap-3 rounded-2xl px-5 py-4 text-base font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isVerifying ? (
-                <>
-                  <SpinnerIcon className="spin h-5 w-5" />
-                  <span>Analyzing...</span>
-                </>
-              ) : (
-                <>
-                  <SparkIcon className="h-5 w-5" />
-                  <span>Run Verification</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          <ResultPanel
-            result={result}
-            metricAnimationKey={metricAnimationKey}
-            downloadReport={downloadReport}
-          />
-        </section>
-      );
-    }
-
-    // Result card with animated confidence and risk visuals.
-    function ResultPanel({ result, metricAnimationKey, downloadReport }) {
-      if (!result) {
-        return (
-          <aside className="glass-card flex min-h-[560px] items-center justify-center rounded-[2rem] p-8">
-            <div className="max-w-sm text-center">
-              <div className="mx-auto mb-6 flex h-28 w-28 items-center justify-center rounded-[2rem] border border-white/10 bg-white/[0.03]">
-                <ShieldOutline className="h-20 w-20 text-slate-700" />
-              </div>
-              <h2 className="text-2xl font-black text-white">No results yet</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-500">Run a verification to reveal authenticity, confidence, risk score, and detected signals.</p>
-            </div>
-          </aside>
-        );
-      }
-
-      const verdict = normalizeVerdict(result.verdict || result.prediction);
-      const confidence = clampNumber(parseFloat(String(result.confidence ?? "").replace("%", "")) || 0, 0, 100);
-      const riskScore = clampNumber(Number(result.risk_score) || 0, 0, 100);
-      const riskLevel = normalizeRiskLevel(result.risk_level, riskScore);
-      const timestamp = result.timestamp || new Date().toISOString();
-      const signals = normalizeSignals(result.signals);
-
-      return (
-        <aside className="glass-card result-enter rounded-[2rem] p-5 sm:p-7 lg:p-8">
-          <div className="flex flex-col gap-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <StatusBadge verdict={verdict} />
-                <h2 className="mt-4 text-4xl font-black tracking-tight text-white sm:text-5xl">{verdict}</h2>
-                <p className="mt-2 text-sm font-medium text-slate-400">Verification verdict generated from asset, metadata, and heuristic signals.</p>
-              </div>
-              <RiskRing key={`ring-${metricAnimationKey}`} score={riskScore} />
-            </div>
-
-            <div className="rounded-3xl border border-[#1e1e2e] bg-black/20 p-5">
-              <div className="mb-3 flex items-center justify-between text-sm">
-                <span className="font-bold text-slate-300">Confidence</span>
-                <span className="font-black text-white">{Math.round(confidence)}%</span>
-              </div>
-              <ConfidenceBar key={`confidence-${metricAnimationKey}`} value={confidence} />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <MetricCard label="Risk Score" value={`${Math.round(riskScore)}/100`} />
-              <div className="rounded-3xl border border-[#1e1e2e] bg-black/20 p-5">
-                <p className="text-sm font-bold text-slate-400">Risk Level</p>
-                <RiskLevelPill level={riskLevel} />
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-[#1e1e2e] bg-black/20 p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-black uppercase tracking-[0.22em] text-slate-400">Signals</h3>
-                <span className="text-xs font-bold text-slate-600">{signals.length} detected</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {signals.length ? signals.map((signal) => (
-                  <span key={signal} className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-bold text-blue-100">
-                    {signal}
-                  </span>
-                )) : (
-                  <span className="rounded-full border border-slate-700 bg-white/[0.04] px-3 py-1.5 text-xs font-bold text-slate-400">No additional signals</span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-4 rounded-3xl border border-[#1e1e2e] bg-black/20 p-5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-bold text-slate-400">Candidate ID</p>
-                <p className="mt-1 font-black text-white">{result.candidate_id || "Not provided"}</p>
-                <p className="mt-2 text-xs font-medium text-slate-500">{formatTimestamp(timestamp)}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => downloadReport(result.verification_id)}
-                className="outline-button rounded-2xl border border-[#1e1e2e] px-5 py-3 text-sm font-black text-slate-200"
-              >
-                Download Report
-              </button>
-            </div>
-          </div>
-        </aside>
-      );
-    }
-
-    // History page with loading skeletons and responsive record cards.
-    function HistoryView({ history, historyLoading, downloadReport }) {
-      return (
-        <section className="glass-card rounded-[2rem] p-5 sm:p-7 lg:p-8">
-          <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-            <div>
-              <p className="mb-2 text-sm font-bold uppercase tracking-[0.28em] text-blue-300/80">Audit Trail</p>
-              <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Verification History</h1>
-            </div>
-            <p className="text-sm font-medium text-slate-500">Organization: <span className="text-slate-300">demo_org</span></p>
-          </div>
-
-          {historyLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((item) => <SkeletonRow key={item} />)}
-            </div>
-          ) : history.length ? (
-            <div className="overflow-hidden rounded-3xl border border-[#1e1e2e]">
-              <div className="hidden grid-cols-[1.1fr_0.85fr_0.8fr_1fr_1fr_0.9fr] bg-white/[0.035] px-5 py-4 text-xs font-black uppercase tracking-[0.18em] text-slate-500 lg:grid">
-                <div>Candidate ID</div>
-                <div>Asset Type</div>
-                <div>Verdict</div>
-                <div>Risk Score</div>
-                <div>Timestamp</div>
-                <div className="text-right">Action</div>
-              </div>
-
-              <div className="divide-y divide-[#1e1e2e]">
-                {history.map((item) => (
-                  <HistoryRow key={item.verification_id} item={item} downloadReport={downloadReport} />
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex min-h-[420px] items-center justify-center rounded-3xl border border-[#1e1e2e] bg-black/20 p-8 text-center">
-              <div>
-                <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-[2rem] border border-white/10 bg-white/[0.03]">
-                  <ShieldOutline className="h-16 w-16 text-slate-700" />
-                </div>
-                <h2 className="text-2xl font-black text-white">No verifications yet</h2>
-                <p className="mt-3 text-sm text-slate-500">Completed checks will appear here after your first verification.</p>
-              </div>
-            </div>
-          )}
-        </section>
-      );
-    }
-
-    function HistoryRow({ item, downloadReport }) {
-      const verdict = normalizeVerdict(item.verdict || item.prediction);
-      const score = clampNumber(Number(item.risk_score) || 0, 0, 100);
-
-      return (
-        <div className="grid gap-4 bg-black/10 px-5 py-5 transition duration-300 ease-in-out hover:bg-blue-500/[0.07] lg:grid-cols-[1.1fr_0.85fr_0.8fr_1fr_1fr_0.9fr] lg:items-center">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-600 lg:hidden">Candidate ID</p>
-            <p className="font-black text-white">{item.candidate_id || "Not provided"}</p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-blue-300">
-              <AssetIcon type={item.asset_type || item.type} className="h-5 w-5" />
-            </div>
-            <span className="font-bold capitalize text-slate-300">{item.asset_type || item.type || "Asset"}</span>
-          </div>
-
-          <div>
-            <StatusBadge verdict={verdict} small />
-          </div>
-
-          <div>
-            <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-500">
-              <span>Risk</span>
-              <span>{Math.round(score)}</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
-              <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-600" style={{ width: `${score}%` }} />
-            </div>
-          </div>
-
-          <div className="text-sm font-bold text-slate-400">{formatRelativeTime(item.timestamp)}</div>
-
-          <div className="lg:text-right">
-            <button
-              type="button"
-              onClick={() => downloadReport(item.verification_id)}
-              className="outline-button rounded-2xl border border-[#1e1e2e] px-4 py-2.5 text-sm font-black text-slate-200"
-            >
-              Download Report
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // Small reusable UI pieces.
-    function StatusBadge({ verdict, small = false }) {
-      const tone = getVerdictTone(verdict);
-      return (
-        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-black ${small ? "text-xs" : "text-sm"}`} style={{ borderColor: tone.border, background: tone.bg, color: tone.color }}>
-          <span className="h-2 w-2 rounded-full" style={{ background: tone.color }} />
-          {verdict}
-        </span>
-      );
-    }
-
-    function RiskLevelPill({ level }) {
-      const tone = getRiskTone(level);
-      return (
-        <span className="mt-3 inline-flex rounded-full border px-4 py-2 text-sm font-black" style={{ borderColor: tone.border, background: tone.bg, color: tone.color }}>
-          {level}
-        </span>
-      );
-    }
-
-    function MetricCard({ label, value }) {
-      return (
-        <div className="rounded-3xl border border-[#1e1e2e] bg-black/20 p-5">
-          <p className="text-sm font-bold text-slate-400">{label}</p>
-          <p className="mt-3 text-3xl font-black tracking-tight text-white">{value}</p>
-        </div>
-      );
-    }
-
-    function ConfidenceBar({ value }) {
-      const [animatedValue, setAnimatedValue] = useState(0);
-
-      useEffect(() => {
-        setAnimatedValue(0);
-        const frame = window.requestAnimationFrame(() => setAnimatedValue(value));
-        return () => window.cancelAnimationFrame(frame);
-      }, [value]);
-
-      return (
-        <div className="h-3 overflow-hidden rounded-full bg-white/[0.06]">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-600 transition-[width] duration-[600ms] ease-out"
-            style={{ width: `${animatedValue}%` }}
-          />
-        </div>
-      );
-    }
-
-    function RiskRing({ score }) {
-      const [animatedScore, setAnimatedScore] = useState(0);
-      const radius = 45;
-      const circumference = 2 * Math.PI * radius;
-      const offset = circumference - (animatedScore / 100) * circumference;
-      const tone = getRiskTone(normalizeRiskLevel("", score));
-
-      useEffect(() => {
-        setAnimatedScore(0);
-        const frame = window.requestAnimationFrame(() => setAnimatedScore(score));
-        return () => window.cancelAnimationFrame(frame);
-      }, [score]);
-
-      return (
-        <div className="relative h-32 w-32 shrink-0">
-          <svg className="-rotate-90" viewBox="0 0 120 120">
-            <circle cx="60" cy="60" r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="10" />
-            <circle
-              cx="60"
-              cy="60"
-              r={radius}
-              fill="none"
-              stroke={tone.color}
-              strokeWidth="10"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={offset}
-              style={{ transition: "stroke-dashoffset 600ms ease-out" }}
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-3xl font-black text-white">{Math.round(score)}</span>
-            <span className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Risk</span>
-          </div>
-        </div>
-      );
-    }
-
-    function SkeletonRow() {
-      return (
-        <div className="rounded-3xl border border-[#1e1e2e] bg-black/20 p-5">
-          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.85fr_0.8fr_1fr_1fr_0.9fr]">
-            {[1, 2, 3, 4, 5, 6].map((item) => <div key={item} className="skeleton h-10 rounded-2xl" />)}
-          </div>
-        </div>
-      );
-    }
-
-    function ToastStack({ toasts }) {
-      return (
-        <div className="fixed right-4 top-24 z-50 flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-3">
-          {toasts.map((toast) => {
-            const warning = toast.type === "warning";
-            return (
-              <div key={toast.id} className="toast-enter rounded-2xl border p-4 shadow-2xl backdrop-blur-xl" style={{ background: "rgba(18, 18, 26, 0.92)", borderColor: warning ? "rgba(245, 158, 11, 0.35)" : "rgba(239, 68, 68, 0.35)" }}>
-                <div className="flex gap-3">
-                  <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: warning ? "var(--uncertain)" : "var(--fake)" }} />
-                  <p className="text-sm font-bold leading-5 text-slate-100">{toast.message}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    function DecorativeBackground() {
-      return (
-        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-          <div className="absolute left-[8%] top-28 h-56 w-56 rounded-full bg-blue-500/10 blur-3xl" />
-          <div className="absolute right-[10%] top-40 h-72 w-72 rounded-full bg-violet-600/10 blur-3xl" />
-          <div className="absolute bottom-0 left-1/2 h-80 w-[70vw] -translate-x-1/2 rounded-full bg-blue-950/20 blur-3xl" />
-        </div>
-      );
-    }
-
-    // API helpers and data formatting.
-    async function parseApiResponse(response, fallbackMessage) {
-      if (response.ok) {
-        return response.json();
-      }
-
-      let message = fallbackMessage;
-
-      try {
-        const data = await response.json();
-        message = data.detail || data.message || message;
-      } catch (error) {
-        message = response.statusText || message;
-      }
-
-      throw new Error(message);
-    }
-
-    function normalizeVerdict(value) {
-      const normalized = String(value || "").trim().toLowerCase();
-
-      if (normalized.includes("fake")) return "FAKE";
-      if (normalized.includes("real")) return "REAL";
-      if (normalized.includes("uncertain")) return "UNCERTAIN";
-      return "UNCERTAIN";
-    }
-
-    function normalizeRiskLevel(level, score) {
-      const normalized = String(level || "").trim().toUpperCase();
-      if (["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(normalized)) return normalized;
-      if (score >= 85) return "CRITICAL";
-      if (score >= 65) return "HIGH";
-      if (score >= 35) return "MEDIUM";
-      return "LOW";
-    }
-
-    function normalizeSignals(signals) {
-      if (!signals) return [];
-
-      if (Array.isArray(signals)) {
-        return signals.map((signal) => String(signal)).filter(Boolean);
-      }
-
-      return Object.entries(signals).map(([key, value]) => {
-        if (typeof value === "boolean") return `${humanizeKey(key)}: ${value ? "Yes" : "No"}`;
-        if (typeof value === "number") return `${humanizeKey(key)}: ${Number.isInteger(value) ? value : value.toFixed(2)}`;
-        return `${humanizeKey(key)}: ${String(value)}`;
-      });
-    }
-
-    function getVerdictTone(verdict) {
-      if (verdict === "REAL") {
-        return { color: "var(--real)", bg: "rgba(34, 197, 94, 0.12)", border: "rgba(34, 197, 94, 0.28)" };
-      }
-      if (verdict === "FAKE") {
-        return { color: "var(--fake)", bg: "rgba(239, 68, 68, 0.12)", border: "rgba(239, 68, 68, 0.28)" };
-      }
-      return { color: "var(--uncertain)", bg: "rgba(245, 158, 11, 0.12)", border: "rgba(245, 158, 11, 0.28)" };
-    }
-
-    function getRiskTone(level) {
-      if (level === "LOW") {
-        return { color: "var(--real)", bg: "rgba(34, 197, 94, 0.12)", border: "rgba(34, 197, 94, 0.28)" };
-      }
-      if (level === "MEDIUM") {
-        return { color: "var(--uncertain)", bg: "rgba(245, 158, 11, 0.12)", border: "rgba(245, 158, 11, 0.28)" };
-      }
-      return { color: "var(--fake)", bg: "rgba(239, 68, 68, 0.12)", border: "rgba(239, 68, 68, 0.28)" };
-    }
-
-    function clampNumber(value, min, max) {
-      return Math.min(Math.max(value, min), max);
-    }
-
-    function formatFileSize(bytes) {
-      if (!bytes) return "0 B";
-      const units = ["B", "KB", "MB", "GB"];
-      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-      return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
-    }
-
-    function formatTimestamp(value) {
-      const date = value ? new Date(value) : new Date();
-      if (Number.isNaN(date.getTime())) return "Timestamp unavailable";
-      return date.toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
-    }
-
-    function formatRelativeTime(value) {
-      const date = value ? new Date(value) : null;
-      if (!date || Number.isNaN(date.getTime())) return "Unknown";
-
-      const diffSeconds = Math.round((Date.now() - date.getTime()) / 1000);
-      const absSeconds = Math.abs(diffSeconds);
-      const units = [
-        ["year", 31536000],
-        ["month", 2592000],
-        ["week", 604800],
-        ["day", 86400],
-        ["hour", 3600],
-        ["minute", 60],
-      ];
-
-      for (const [unit, seconds] of units) {
-        if (absSeconds >= seconds) {
-          const amount = Math.round(diffSeconds / seconds);
-          return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-amount, unit);
-        }
-      }
-
-      return "Just now";
-    }
-
-    function humanizeKey(key) {
-      return String(key)
-        .replace(/[_-]/g, " ")
-        .replace(/\b\w/g, (letter) => letter.toUpperCase());
-    }
-
-    // Inline SVG icon set.
-    function ShieldLogo({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 48 48" fill="none" aria-hidden="true">
-          <rect width="48" height="48" rx="16" fill="url(#logoGradient)" />
-          <path d="M24 10L36 15V23.8C36 31.1 31.1 37.5 24 39C16.9 37.5 12 31.1 12 23.8V15L24 10Z" stroke="white" strokeWidth="2.4" strokeLinejoin="round" />
-          <path d="M19 24.3L22.4 27.7L29.8 19.8" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-          <defs>
-            <linearGradient id="logoGradient" x1="8" y1="8" x2="40" y2="42" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#3b82f6" />
-              <stop offset="1" stopColor="#7c3aed" />
-            </linearGradient>
-          </defs>
-        </svg>
-      );
-    }
-
-    function ShieldOutline({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 96 96" fill="none" aria-hidden="true">
-          <path d="M48 10L76 21.4V43.6C76 61.5 64.6 77.8 48 84C31.4 77.8 20 61.5 20 43.6V21.4L48 10Z" stroke="currentColor" strokeWidth="4" strokeLinejoin="round" />
-          <path d="M36 48L44.4 56.4L61 38" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    }
-
-    function UploadIcon({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 16V4M12 4L7 9M12 4L17 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M20 16.5V18C20 19.1 19.1 20 18 20H6C4.9 20 4 19.1 4 18V16.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      );
-    }
-
-    function FileTypeIcon({ file, className }) {
-      const name = (file.name || "").toLowerCase();
-      const type = (file.type || "").toLowerCase();
-
-      if (type.startsWith("image/")) return <ImageIcon className={className} />;
-      if (type.startsWith("video/")) return <VideoIcon className={className} />;
-      if (type.includes("pdf") || name.endsWith(".pdf")) return <PdfIcon className={className} />;
-      return <DocumentIcon className={className} />;
-    }
-
-    function AssetIcon({ type, className }) {
-      const normalized = String(type || "").toLowerCase();
-      if (normalized.includes("video")) return <VideoIcon className={className} />;
-      if (normalized.includes("photo") || normalized.includes("image")) return <ImageIcon className={className} />;
-      return <DocumentIcon className={className} />;
-    }
-
-    function ImageIcon({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 6C4 4.9 4.9 4 6 4H18C19.1 4 20 4.9 20 6V18C20 19.1 19.1 20 18 20H6C4.9 20 4 19.1 4 18V6Z" stroke="currentColor" strokeWidth="2" />
-          <path d="M8.5 10.5C9.33 10.5 10 9.83 10 9C10 8.17 9.33 7.5 8.5 7.5C7.67 7.5 7 8.17 7 9C7 9.83 7.67 10.5 8.5 10.5Z" fill="currentColor" />
-          <path d="M6 17L10 13L12.5 15.5L15 13L19 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    }
-
-    function VideoIcon({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 7C4 5.9 4.9 5 6 5H14C15.1 5 16 5.9 16 7V17C16 18.1 15.1 19 14 19H6C4.9 19 4 18.1 4 17V7Z" stroke="currentColor" strokeWidth="2" />
-          <path d="M16 10L20 7.5V16.5L16 14V10Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M10 9.5L13 12L10 14.5V9.5Z" fill="currentColor" />
-        </svg>
-      );
-    }
-
-    function DocumentIcon({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M7 3H14L19 8V21H7C5.9 21 5 20.1 5 19V5C5 3.9 5.9 3 7 3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-          <path d="M14 3V8H19" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-          <path d="M8.5 13H15.5M8.5 17H13.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      );
-    }
-
-    function PdfIcon({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M7 3H14L19 8V21H7C5.9 21 5 20.1 5 19V5C5 3.9 5.9 3 7 3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-          <path d="M14 3V8H19" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-          <path d="M8 16V12H9.5C10.33 12 11 12.67 11 13.5C11 14.33 10.33 15 9.5 15H8M12.5 16V12H14C15.1 12 16 12.9 16 14C16 15.1 15.1 16 14 16H12.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    }
-
-    function ChevronDown({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M6 9L12 15L18 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    }
-
-    function SpinnerIcon({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.22" strokeWidth="3" />
-          <path d="M21 12C21 7.03 16.97 3 12 3" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-        </svg>
-      );
-    }
-
-    function SparkIcon({ className }) {
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M13 2L10.9 8.2L5 10.5L10.9 12.8L13 19L15.1 12.8L21 10.5L15.1 8.2L13 2Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-          <path d="M5 15L4 18L1 19L4 20L5 23L6 20L9 19L6 18L5 15Z" fill="currentColor" />
-        </svg>
-      );
-    }
-
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'asli-green':       '#16A34A',
+            'asli-green-light': '#DCFCE7',
+            'nakli-red':        '#DC2626',
+            'nakli-red-light':  '#FEE2E2',
+            'shak-amber':       '#D97706',
+            'shak-amber-light': '#FEF3C7',
+            'asli-bg':          '#FAFAF9',
+            'asli-text':        '#1C1917',
+            'asli-muted':       '#78716C',
+          },
+          fontFamily: {
+            sans:  ['Inter', 'system-ui', 'sans-serif'],
+            deva:  ['"Noto Sans Devanagari"', 'Inter', 'sans-serif'],
+            guja:  ['"Noto Sans Gujarati"',   'Inter', 'sans-serif'],
+          },
+        },
+      },
+    };
   </script>
+
+  <!-- Lucide icons via CDN -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- API endpoint — change this after Cloud Run deploy -->
+  <script>
+    window.ASLI_API_URL = window.ASLI_API_URL || 'http://localhost:8000';
+  </script>
+</head>
+<body class="bg-asli-bg text-asli-text antialiased min-h-screen flex flex-col font-sans">
+
+  <!-- ─── Header ─── -->
+  <header class="sticky top-0 z-30 bg-asli-bg/85 backdrop-blur border-b border-stone-200">
+    <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <img src="assets/logo.svg" alt="Asli" class="w-8 h-8" />
+        <span class="font-extrabold text-lg tracking-tight">Asli</span>
+      </div>
+      <div class="flex items-center gap-1 text-sm bg-white border border-stone-200 rounded-full p-0.5">
+        <button data-lang="hi" class="lang-btn px-3 py-1 rounded-full font-semibold font-deva transition">हिं</button>
+        <button data-lang="gu" class="lang-btn px-3 py-1 rounded-full font-semibold font-guja transition">ગુ</button>
+        <button data-lang="en" class="lang-btn px-3 py-1 rounded-full font-semibold transition">EN</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── Main ─── -->
+  <main class="flex-1 max-w-md mx-auto w-full px-4 py-6">
+
+    <!-- SCREEN A — UPLOAD (two sub-states: pick → ready) -->
+    <section id="screen-upload" class="screen">
+      <div class="text-center mb-8 mt-4">
+        <h1 id="hero" class="text-4xl font-extrabold tracking-tight leading-tight mb-3"></h1>
+        <p id="subhero" class="text-asli-muted text-base"></p>
+      </div>
+
+      <!-- Sub-state 1: PICK (no file yet) -->
+      <div id="upload-pick">
+        <label
+          id="dropzone"
+          for="file-input"
+          class="block cursor-pointer rounded-2xl border-2 border-dashed border-stone-300 bg-white px-6 py-12 text-center transition-all hover:border-asli-green hover:bg-stone-50">
+          <div class="flex flex-col items-center gap-3">
+            <div class="w-16 h-16 rounded-full bg-asli-green-light flex items-center justify-center">
+              <i data-lucide="upload-cloud" class="w-8 h-8 text-asli-green"></i>
+            </div>
+            <p id="dropzone-text" class="font-semibold text-asli-text"></p>
+            <p id="dropzone-hint" class="text-sm text-asli-muted"></p>
+          </div>
+        </label>
+        <input id="file-input" type="file" accept="image/*" class="sr-only" />
+
+        <div class="flex items-center my-6 gap-3 text-stone-400 text-xs uppercase tracking-wider">
+          <div class="flex-1 h-px bg-stone-200"></div>
+          <span id="or-text">or</span>
+          <div class="flex-1 h-px bg-stone-200"></div>
+        </div>
+
+        <label
+          for="camera-input"
+          class="cursor-pointer rounded-xl bg-asli-text text-white font-semibold py-4 text-center flex items-center justify-center gap-2 hover:bg-stone-800 transition w-full">
+          <i data-lucide="camera" class="w-5 h-5"></i>
+          <span id="camera-text">Take a photo</span>
+        </label>
+        <input id="camera-input" type="file" accept="image/*" capture="environment" class="sr-only" />
+      </div>
+
+      <!-- Sub-state 2: READY-TO-EVALUATE (file picked, awaiting confirmation) -->
+      <div id="upload-ready" class="hidden">
+        <div class="rounded-2xl bg-white border border-stone-200 p-3 mb-4 shadow-sm">
+          <div class="rounded-xl overflow-hidden bg-stone-100 aspect-[4/3] flex items-center justify-center">
+            <img id="preview-image" alt="" class="w-full h-full object-contain" />
+          </div>
+          <div class="flex items-center justify-between mt-3 px-1">
+            <p class="text-xs text-asli-muted truncate flex-1 mr-3">
+              <i data-lucide="image" class="w-3.5 h-3.5 inline-block -mt-0.5"></i>
+              <span id="preview-filename"></span>
+            </p>
+            <button
+              id="change-image-btn"
+              class="text-xs font-semibold text-asli-text hover:underline shrink-0 inline-flex items-center gap-1">
+              <i data-lucide="x" class="w-3.5 h-3.5"></i>
+              <span id="change-image-text"></span>
+            </button>
+          </div>
+        </div>
+
+        <button
+          id="evaluate-btn"
+          class="w-full rounded-xl bg-asli-green text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-green-700 transition shadow-md">
+          <i data-lucide="shield-check" class="w-5 h-5"></i>
+          <span id="evaluate-text"></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- SCREEN B — SCANNING -->
+    <section id="screen-scanning" class="screen hidden">
+      <div class="text-center pt-6">
+        <div class="relative inline-block rounded-2xl overflow-hidden bg-stone-100 mb-8 max-w-xs shadow-lg">
+          <img id="scanning-image" alt="" class="w-full h-auto blur-sm opacity-75" />
+          <div class="absolute inset-0 pointer-events-none">
+            <div class="scan-line"></div>
+          </div>
+          <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/10"></div>
+        </div>
+        <div class="flex items-center justify-center gap-2 mb-3">
+          <span class="w-2.5 h-2.5 rounded-full bg-asli-green animate-pulse"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-asli-green animate-pulse" style="animation-delay: 200ms"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-asli-green animate-pulse" style="animation-delay: 400ms"></span>
+        </div>
+        <p id="scan-status" class="text-asli-text font-medium text-base"></p>
+      </div>
+    </section>
+
+    <!-- SCREEN C — RESULT -->
+    <section id="screen-result" class="screen hidden">
+      <!-- Verdict badge -->
+      <div id="verdict-badge" class="rounded-2xl p-6 text-center mb-5">
+        <div id="verdict-icon" class="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center mx-auto mb-3"></div>
+        <p id="verdict-label" class="text-white text-3xl font-extrabold tracking-tight"></p>
+        <p id="confidence-text" class="text-white/85 text-sm mt-1"></p>
+      </div>
+
+      <!-- Confidence + thumbnail row -->
+      <div class="flex items-center gap-4 mb-5 bg-white rounded-xl p-4 border border-stone-200">
+        <img id="result-thumb" alt="" class="w-16 h-16 rounded-lg object-cover bg-stone-100 shrink-0" />
+        <div class="flex-1 min-w-0">
+          <p id="confidence-label-i18n" class="text-xs uppercase tracking-wider text-asli-muted mb-1"></p>
+          <p class="text-3xl font-extrabold leading-none">
+            <span id="confidence-num">0</span><span class="text-lg text-asli-muted">%</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Explanation card -->
+      <div class="bg-white rounded-xl p-5 mb-4 border border-stone-200">
+        <p id="explanation-label" class="text-xs uppercase tracking-wider text-asli-muted mb-2"></p>
+        <p id="explanation-text" class="text-asli-text leading-relaxed"></p>
+      </div>
+
+      <!-- Red flags card -->
+      <div id="redflags-container" class="bg-white rounded-xl p-5 mb-4 border border-stone-200">
+        <p id="redflags-label" class="text-xs uppercase tracking-wider text-asli-muted mb-3"></p>
+        <ul id="redflags-list" class="space-y-2"></ul>
+      </div>
+
+      <!-- Tip card -->
+      <div class="rounded-xl p-5 mb-6 bg-amber-50 border border-amber-200">
+        <div class="flex gap-3">
+          <div class="w-9 h-9 shrink-0 rounded-lg bg-amber-100 flex items-center justify-center">
+            <i data-lucide="lightbulb" class="w-5 h-5 text-amber-700"></i>
+          </div>
+          <div class="min-w-0">
+            <p id="tip-label" class="text-xs uppercase tracking-wider text-amber-700 mb-1"></p>
+            <p id="tip-text" class="text-amber-900 leading-relaxed text-sm"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="grid grid-cols-2 gap-3">
+        <button id="scan-another-btn" class="rounded-xl bg-asli-text text-white font-semibold py-4 hover:bg-stone-800 transition">
+          <span id="scan-another-text"></span>
+        </button>
+        <button id="share-btn" class="rounded-xl bg-asli-green text-white font-semibold py-4 hover:bg-green-700 transition flex items-center justify-center gap-2">
+          <i data-lucide="share-2" class="w-5 h-5"></i>
+          <span id="share-text"></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ERROR STATE -->
+    <section id="screen-error" class="screen hidden">
+      <div class="bg-red-50 border border-red-200 rounded-xl p-6 text-center mt-6">
+        <div class="w-16 h-16 rounded-full bg-red-100 mx-auto mb-3 flex items-center justify-center">
+          <i data-lucide="alert-triangle" class="w-8 h-8 text-red-600"></i>
+        </div>
+        <p id="error-title" class="font-semibold mb-2"></p>
+        <p id="error-message" class="text-sm text-asli-muted mb-4 break-words"></p>
+        <button id="retry-btn" class="rounded-xl bg-asli-text text-white font-semibold py-3 px-6">
+          <span id="retry-text"></span>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="text-center text-xs text-asli-muted py-4 px-4">
+    <span id="footer-text"></span>
+  </footer>
+
+  <script src="app.js"></script>
 </body>
 </html>

@@ -852,8 +852,15 @@ def fuse_results(model_result: dict, metadata_result: dict, heuristic_result: di
 
 
 def _format_image_result(fused: dict) -> dict:
-    explanation = fused.get("gemini_explanation", "Explanation unavailable")
-    explanation_source = "gemini" if explanation not in {"Explanation unavailable", ""} else "unavailable"
+    explanation_payload = fused.get("explanation") or {}
+    explanation_text = (
+        explanation_payload.get("explanation_en")
+        or fused.get("gemini_explanation")
+        or "Explanation unavailable"
+    )
+    explanation_source = explanation_payload.get("source") or (
+        "gemini" if explanation_text != "Explanation unavailable" else "unavailable"
+    )
     raw_source = fused.get("source", "")
     if raw_source in {"ensemble", "gemini+ensemble"}:
         score_source = raw_source
@@ -875,13 +882,19 @@ def _format_image_result(fused: dict) -> dict:
         "details": fused["details"],
         "risk_score": fused["risk_score"],
         "verdict": fused["verdict"],
+        "explanation": explanation_payload,
         "signals": {
             "fake_score": fused["fake_probability"],
             "source": fused["source"],
             "model_loaded": fused["model_loaded"],
             "score_source": score_source,
             "explanation_source": explanation_source,
-            "gemini_explanation": explanation,
+            "gemini_explanation": explanation_text,
+            "explanation_local": explanation_payload.get("explanation_local"),
+            "red_flags": explanation_payload.get("red_flags"),
+            "learn_more_tip": explanation_payload.get("learn_more_tip"),
+            "verdict_label": explanation_payload.get("verdict"),
+            "confidence_pct": explanation_payload.get("confidence_pct"),
             "reliability_score": fused["reliability_score"],
             "metadata_status": fused["metadata_status"],
             "model_score": fused["details"]["model_score"],
@@ -891,48 +904,58 @@ def _format_image_result(fused: dict) -> dict:
     }
 
 
-def analyze_image(image_path: str) -> dict:
+def analyze_image(image_path: str, target_language: str = "hi") -> dict:
+    with open(image_path, "rb") as fh:
+        image_bytes = fh.read()
+
     image = _open_image(image_path)
     metadata_result = analyze_metadata(image_path)
     heuristic_result = analyze_heuristics(image)
 
     # ── Stage 1: three-model pipeline ────────────────────────────────────────
-    xception_result    = predict_image(image)            # Model 1: Xception
+    xception_result    = predict_image(image)              # Model 1: Xception
     efficientnet_result = predict_with_efficientnet(image) # Model 2: EfficientNet
-    hf_result          = predict_with_hf_detector(image)  # Model 3: HF detector
+    hf_result          = predict_with_hf_detector(image)   # Model 3: HF detector
 
-    # ── Stage 2: ensemble ─────────────────────────────────────────────────────
+    # ── Stage 2: ensemble (authoritative score) ──────────────────────────────
     ensemble = ensemble_image_predictions(
         xception_result, efficientnet_result, hf_result,
         heuristic_score=heuristic_result["heuristic_score"],
         metadata_score=metadata_result["metadata_score"],
     )
 
-    # ── Stage 3: optional Gemini refinement ───────────────────────────────────
-    gemini_result = _analyze_image_with_gemini(image, metadata_result)
-    if gemini_result:
-        gemini_fake   = gemini_result["details"].get("fake_probability", ensemble["fake_probability"])
-        ensemble_fake = ensemble["fake_probability"]
-        fake_score    = _clamp(gemini_fake * 0.55 + ensemble_fake * 0.45)
-        source        = "gemini+ensemble"
-        gemini_explanation = gemini_result.get("signals", {}).get("gemini_verdict", "See Gemini analysis")
-    else:
-        fake_score    = ensemble["fake_probability"]
-        source        = ensemble["source"]
-        gemini_explanation = _generate_gemini_image_explanation(image, fake_score)
-
+    fake_score   = ensemble["fake_probability"]
+    source       = ensemble["source"]
     model_loaded = ensemble["model_loaded"]
     prediction   = _classify_fake_score(fake_score, model_loaded)
     confidence   = _prediction_confidence(fake_score, prediction, source)
     if source == "fallback":
         confidence = min(confidence, MAX_FALLBACK_CONFIDENCE)
 
-    n_models     = len(ensemble["models_used"])
-    reliability  = round(_clamp(0.50 + n_models * 0.15), 4)
+    n_models    = len(ensemble["models_used"])
+    reliability = round(_clamp(0.50 + n_models * 0.15), 4)
+
+    # ── Stage 3: multilingual explainer (Gemini → template fallback) ─────────
+    from gemini_explainer import generate_explanation
+
+    explainer_features = {
+        "models_used": ensemble["models_used"],
+        "individual_scores": ensemble["individual_scores"],
+        "heuristics": heuristic_result,
+        "metadata_status": metadata_result["metadata_status"],
+        "ensemble_fake_probability": fake_score,
+    }
+    explanation = generate_explanation(
+        image_bytes=image_bytes,
+        fake_prob=fake_score,
+        features=explainer_features,
+        target_language=target_language,
+    )
 
     print(f"Final fake score: {fake_score:.8f}", flush=True)
     print(f"Final label: {prediction}", flush=True)
     print(f"Source: {source}  Models: {ensemble['models_used']}", flush=True)
+    print(f"Explainer source: {explanation['source']}  Language: {target_language}", flush=True)
 
     fused = {
         "prediction":       prediction,
@@ -945,7 +968,8 @@ def analyze_image(image_path: str) -> dict:
         "risk_level":       _risk_level(fake_score),
         "risk_score":       _to_risk_score(fake_score),
         "verdict":          prediction if prediction == "Uncertain" else prediction.upper(),
-        "gemini_explanation": gemini_explanation,
+        "gemini_explanation": explanation["explanation_en"],  # backward-compat
+        "explanation":      explanation,
         "details": {
             "fake_probability": fake_score,
             "model_score":      ensemble["fake_probability"],
@@ -954,9 +978,11 @@ def analyze_image(image_path: str) -> dict:
             "metadata_status":  metadata_result["metadata_status"],
             "score_source":     source,
             "ensemble":         ensemble,
+            "explanation":      explanation,
             "gemini": {
                 "model":       GEMINI_MODEL_NAME,
-                "explanation": gemini_explanation,
+                "explanation": explanation["explanation_en"],
+                "source":      explanation["source"],
             },
             "model":     xception_result,
             "metadata":  metadata_result,
