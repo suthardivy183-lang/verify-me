@@ -1166,9 +1166,8 @@ function init() {
     $('close-history').addEventListener('click', closeHistoryPanel);
     $('panel-overlay').addEventListener('click', () => { closeHistoryPanel(); closeSettingsPanel(); });
 
-    // Settings panel
+    // Settings panel (dropdown entry, only visible when signed in)
     $('settings-btn').addEventListener('click', () => openSettingsPanel());
-    $('close-settings').addEventListener('click', closeSettingsPanel);
 
     // Load global scan counter for social proof
     loadGlobalStats();
@@ -1185,6 +1184,18 @@ function init() {
       else showLoggedOutNav();
     });
   }
+
+  // Settings panel — always accessible (guests + signed-in users)
+  $('settings-gear-btn').addEventListener('click', () => openSettingsPanel());
+  $('close-settings').addEventListener('click', closeSettingsPanel);
+
+  // Escape closes settings even without Firebase
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeSettingsPanel();
+  });
+
+  // Overlay tap closes settings even without Firebase
+  $('panel-overlay').addEventListener('click', () => closeSettingsPanel());
 
   if (window.lucide) lucide.createIcons();
 }
