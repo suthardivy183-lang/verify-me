@@ -18,12 +18,12 @@ const API_BASE = (window.ASLI_API_URL || 'http://localhost:8000').replace(/\/+$/
 // 6. Refresh page — user should still be logged in (Firebase persists session)
 // 7. Click name → dropdown → "Sign out" — verify reverts to sign-in button
 const firebaseConfig = {
-  apiKey:            'YOUR_API_KEY',
-  authDomain:        'YOUR_PROJECT_ID.firebaseapp.com',
-  projectId:         'YOUR_PROJECT_ID',
-  storageBucket:     'YOUR_PROJECT_ID.appspot.com',
-  messagingSenderId: 'YOUR_SENDER_ID',
-  appId:             'YOUR_APP_ID',
+  apiKey:            'AIzaSyBWJ_zMA8R45iuXLifEaBm5NVh6zCe1ghM',
+  authDomain:        'asli-solution-challenge.firebaseapp.com',
+  projectId:         'asli-solution-challenge',
+  storageBucket:     'asli-solution-challenge.firebasestorage.app',
+  messagingSenderId: '229619506340',
+  appId:             '1:229619506340:web:37c92311c615ac6143da31',
 };
 
 let _firebaseReady = false;
@@ -1085,7 +1085,7 @@ function signIn() {
   auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())
     .catch(err => {
       console.error('Sign in failed:', err);
-      showToast('Sign in failed. Please try again.', 'error');
+      showToast('Sign in failed: ' + (err.code || err.message), 'error');
     });
 }
 
