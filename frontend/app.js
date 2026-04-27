@@ -655,6 +655,306 @@ function renderHistoryList(docs) {
   });
 }
 
+// ─── Settings panel ──────────────────────────────────────────────────────────
+
+function openSettingsPanel() {
+  closeHistoryPanel();
+  _closeDropdown();
+  $('settings-panel').classList.add('open');
+  $('panel-overlay').classList.add('show');
+  if (window.lucide) lucide.createIcons();
+  renderSettingsContent();
+}
+
+function closeSettingsPanel() {
+  const p = $('settings-panel');
+  const o = $('panel-overlay');
+  if (p) p.classList.remove('open');
+  // Only hide overlay if history is also closed
+  if (o && !$('history-panel').classList.contains('open')) o.classList.remove('show');
+}
+
+function renderSettingsContent() {
+  const content = $('settings-content');
+  if (!content) return;
+  const user = _firebaseReady && auth ? auth.currentUser : null;
+
+  content.innerHTML =
+    _settingsSectionLanguage() +
+    _settingsSectionNotifications() +
+    _settingsSectionAccount(user) +
+    _settingsSectionAbout() +
+    _settingsSectionPrivacy();
+
+  // Wire language buttons
+  content.querySelectorAll('.settings-lang-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      saveLanguagePref(btn.dataset.lang);
+      content.querySelectorAll('.settings-lang-btn').forEach(b => {
+        const active = b.dataset.lang === btn.dataset.lang;
+        b.style.background = active ? '#1c1917' : '#fff';
+        b.style.color      = active ? '#fff'    : '#78716c';
+        b.style.borderColor = active ? '#1c1917' : '#e5e7eb';
+      });
+    });
+  });
+
+  // Wire account buttons
+  if (user) {
+    const exportBtn = content.querySelector('#settings-export-btn');
+    if (exportBtn) exportBtn.addEventListener('click', exportUserData);
+    const deleteBtn = content.querySelector('#settings-delete-btn');
+    if (deleteBtn) deleteBtn.addEventListener('click', () => {
+      showConfirmDialog(
+        '⚠️ Delete Account?',
+        '<p class="mb-2">This will permanently delete:</p>' +
+        '<ul class="list-disc list-inside space-y-1 mb-3">' +
+          '<li>All your scan history</li>' +
+          '<li>Your settings</li>' +
+          '<li>Your Asli account</li>' +
+        '</ul>' +
+        '<p class="font-medium text-asli-text">This cannot be undone.</p>',
+        deleteAccount
+      );
+    });
+  } else {
+    const signInBtn = content.querySelector('#settings-signin-btn');
+    if (signInBtn) signInBtn.addEventListener('click', () => { closeSettingsPanel(); signIn(); });
+  }
+}
+
+function _settingsCard(title, icon, badgeHtml, body) {
+  return (
+    `<div class="bg-white rounded-2xl border border-[#e5e7eb] p-4">` +
+      `<div class="flex items-center justify-between mb-3">` +
+        `<p class="text-xs font-medium uppercase tracking-wider" style="color:#9ca3af;letter-spacing:0.06em">${icon} ${title}</p>` +
+        badgeHtml +
+      `</div>` +
+      body +
+    `</div>`
+  );
+}
+
+function _settingsSectionLanguage() {
+  const lang = state.language;
+  const btns = [
+    { code: 'hi', label: 'हिं' },
+    { code: 'gu', label: 'ગુ' },
+    { code: 'en', label: 'EN' },
+  ].map(({ code, label }) => {
+    const active = code === lang;
+    return (
+      `<button class="settings-lang-btn px-4 py-2 rounded-lg text-sm font-semibold border transition" ` +
+      `data-lang="${code}" ` +
+      `style="background:${active ? '#1c1917' : '#fff'};color:${active ? '#fff' : '#78716c'};border-color:${active ? '#1c1917' : '#e5e7eb'}">` +
+      label +
+      `</button>`
+    );
+  }).join('');
+  return _settingsCard('Language', '\u{1F310}', '',
+    `<p class="text-sm text-asli-muted mb-3">Default language for results</p>` +
+    `<div class="flex gap-2">${btns}</div>`
+  );
+}
+
+function _settingsSectionNotifications() {
+  const badge = `<span class="text-xs font-semibold px-2 py-0.5 rounded-full" style="background:#FEF3C7;color:#D97706">Phase 2</span>`;
+  const row = (label) =>
+    `<label class="flex items-center justify-between py-2.5 select-none" title="Coming in Phase 2 — WhatsApp Bot">` +
+      `<span class="text-sm" style="color:#9ca3af">${label}</span>` +
+      `<div class="w-10 h-6 rounded-full relative shrink-0" style="background:#e5e7eb">` +
+        `<div class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm"></div>` +
+      `</div>` +
+    `</label>`;
+  return _settingsCard('Notifications', '\u{1F514}', badge,
+    `<div class="opacity-50 pointer-events-none">` +
+      row('Scam alerts in my area') +
+      `<div style="border-top:0.5px solid #f3f4f6"></div>` +
+      row('Weekly media-literacy tips') +
+    `</div>`
+  );
+}
+
+function _settingsSectionAccount(user) {
+  if (!user) {
+    return _settingsCard('Account', '\u{1F464}', '',
+      `<p class="text-sm text-asli-muted mb-3">Sign in to manage your account and scan history.</p>` +
+      `<button id="settings-signin-btn" ` +
+        `class="w-full rounded-xl bg-asli-text text-white font-semibold py-2.5 text-sm hover:bg-stone-800 transition">` +
+        `Sign in with Google` +
+      `</button>`
+    );
+  }
+  return _settingsCard('Account', '\u{1F464}', '',
+    `<div class="flex items-center gap-3 mb-4">` +
+      `<img src="${escapeHtml(user.photoURL || '')}" alt="" class="w-12 h-12 rounded-full bg-stone-100 object-cover shrink-0" />` +
+      `<div class="min-w-0">` +
+        `<p class="font-semibold text-asli-text truncate">${escapeHtml(user.displayName || '')}</p>` +
+        `<p class="text-xs text-asli-muted truncate">${escapeHtml(user.email || '')}</p>` +
+        `<p class="text-xs text-asli-muted">Signed in with Google</p>` +
+      `</div>` +
+    `</div>` +
+    `<div style="border-top:0.5px solid #f3f4f6" class="mb-3"></div>` +
+    `<button id="settings-export-btn" ` +
+      `class="w-full rounded-xl border border-stone-200 text-asli-text font-semibold py-2.5 text-sm hover:bg-stone-50 transition mb-2">` +
+      `Export my data` +
+    `</button>` +
+    `<button id="settings-delete-btn" ` +
+      `class="w-full rounded-xl text-sm font-semibold py-2.5 hover:bg-red-50 transition" ` +
+      `style="color:#DC2626;border:1px solid #FECACA">` +
+      `Delete account and all data` +
+    `</button>`
+  );
+}
+
+function _settingsSectionAbout() {
+  return _settingsCard('About Asli', '\u{2139}\u{FE0F}', '',
+    `<p class="text-sm font-medium text-asli-text mb-0.5">Version 1.0.0</p>` +
+    `<p class="text-sm text-asli-muted mb-1">Built for Google Solution Challenge 2026</p>` +
+    `<p class="text-xs text-asli-muted mb-3">Theme: Digital Asset Protection &nbsp;·&nbsp; SDG 16 · SDG 10</p>` +
+    `<div style="border-top:0.5px solid #f3f4f6" class="mb-3"></div>` +
+    `<a href="https://github.com/suthardivy183-lang/verify-me" target="_blank" rel="noopener" ` +
+      `class="flex items-center gap-2 text-sm font-semibold text-asli-green hover:underline mb-2">` +
+      `View on GitHub →` +
+    `</a>` +
+    `<a href="mailto:suthardivy183@gmail.com" ` +
+      `class="flex items-center gap-2 text-sm font-semibold text-asli-muted hover:underline">` +
+      `Report a bug →` +
+    `</a>`
+  );
+}
+
+function _settingsSectionPrivacy() {
+  const item = (text) =>
+    `<li class="flex gap-2 items-start text-sm text-asli-muted">` +
+      `<span class="shrink-0 mt-0.5" style="color:#16A34A">✓</span>${text}` +
+    `</li>`;
+  return _settingsCard('Privacy', '\u{1F512}', '',
+    `<ul class="space-y-2 mb-4">` +
+      item('We never store your original images on our servers.') +
+      item('Only a 100×100 px thumbnail and anonymized metadata are saved to your history.') +
+      item('Guest scans are never stored.') +
+      item('Your images are deleted from Cloud Storage within 24 hours.') +
+    `</ul>` +
+    `<a href="privacy.html" class="text-sm font-semibold text-asli-green hover:underline">` +
+      `View Privacy Policy →` +
+    `</a>`
+  );
+}
+
+// ─── Settings — language pref ─────────────────────────────────────────────────
+
+async function saveLanguagePref(lang) {
+  if (!i18n[lang]) return;
+  localStorage.setItem('asli_lang', lang);
+  state.language = lang;
+  applyLanguage();
+  if (_firebaseReady && auth && auth.currentUser) {
+    try {
+      await db.collection('users').doc(auth.currentUser.uid)
+        .set({ settings: { language: lang } }, { merge: true });
+    } catch (e) { /* silent */ }
+  }
+}
+
+async function loadUserSettings(uid) {
+  if (!_firebaseReady || !db) return;
+  try {
+    const doc = await db.collection('users').doc(uid).get();
+    if (doc.exists) {
+      const settings = doc.data().settings || {};
+      if (settings.language && i18n[settings.language]) {
+        localStorage.setItem('asli_lang', settings.language);
+        state.language = settings.language;
+        applyLanguage();
+      }
+    }
+  } catch (e) { /* silent */ }
+}
+
+// ─── Settings — export / delete account ──────────────────────────────────────
+
+async function exportUserData() {
+  const user = _firebaseReady && auth ? auth.currentUser : null;
+  if (!user) return;
+  try {
+    const snap = await db.collection('users').doc(user.uid)
+      .collection('scans').orderBy('timestamp', 'desc').get();
+    const scans = snap.docs.map(doc => {
+      const d = { ...doc.data(), id: doc.id };
+      d.imageThumbnail = '[removed for export]';
+      if (d.timestamp && d.timestamp.toDate) d.timestamp = d.timestamp.toDate().toISOString();
+      return d;
+    });
+    const payload = { exported_at: new Date().toISOString(), user: user.email, scans };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `Asli_MyData_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    showToast('Data exported successfully', 'success');
+  } catch (err) {
+    console.error('Export failed:', err);
+    showToast('Export failed. Please try again.', 'error');
+  }
+}
+
+async function deleteAccount() {
+  const user = _firebaseReady && auth ? auth.currentUser : null;
+  if (!user) return;
+  try {
+    const scansSnap = await db.collection('users').doc(user.uid).collection('scans').get();
+    const batch = db.batch();
+    scansSnap.docs.forEach(doc => batch.delete(doc.ref));
+    batch.delete(db.collection('users').doc(user.uid));
+    await batch.commit();
+    await user.delete();
+    closeSettingsPanel();
+    showToast('Account deleted. Sorry to see you go.', 'info');
+    reset();
+  } catch (err) {
+    if (err.code === 'auth/requires-recent-login') {
+      showToast('Please sign out and sign in again, then retry.', 'error');
+    } else {
+      console.error('Delete account failed:', err);
+      showToast('Delete failed. Please try again.', 'error');
+    }
+  }
+}
+
+// ─── Confirm dialog ───────────────────────────────────────────────────────────
+
+function showConfirmDialog(title, bodyHtml, onConfirm) {
+  const dialog    = $('confirm-dialog');
+  const titleEl   = $('confirm-title');
+  const bodyEl    = $('confirm-body');
+  const okBtn     = $('confirm-ok');
+  const cancelBtn = $('confirm-cancel');
+  if (!dialog) return;
+
+  titleEl.textContent = title;
+  bodyEl.innerHTML    = bodyHtml;
+  dialog.classList.remove('hidden');
+  okBtn.focus();
+
+  function cleanup() {
+    dialog.classList.add('hidden');
+    okBtn.removeEventListener('click', handleOk);
+    cancelBtn.removeEventListener('click', handleCancel);
+    document.removeEventListener('keydown', handleKey);
+  }
+  function handleOk()     { cleanup(); onConfirm(); }
+  function handleCancel() { cleanup(); }
+  function handleKey(e)   { if (e.key === 'Escape') handleCancel(); }
+
+  okBtn.addEventListener('click', handleOk);
+  cancelBtn.addEventListener('click', handleCancel);
+  document.addEventListener('keydown', handleKey);
+}
+
 // ─── Toast ───────────────────────────────────────────────────────────────────
 function showToast(message, type = 'info') {
   const palette = {
@@ -850,11 +1150,12 @@ function init() {
       if (_dropdownOpen && !$('auth-area').contains(e.target)) _closeDropdown();
     });
 
-    // Close dropdown or history panel on Escape
+    // Close dropdown / panels on Escape
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         if (_dropdownOpen) _closeDropdown();
         closeHistoryPanel();
+        closeSettingsPanel();
       }
     });
 
@@ -863,7 +1164,11 @@ function init() {
 
     // History panel close controls
     $('close-history').addEventListener('click', closeHistoryPanel);
-    $('panel-overlay').addEventListener('click', closeHistoryPanel);
+    $('panel-overlay').addEventListener('click', () => { closeHistoryPanel(); closeSettingsPanel(); });
+
+    // Settings panel
+    $('settings-btn').addEventListener('click', () => openSettingsPanel());
+    $('close-settings').addEventListener('click', closeSettingsPanel);
 
     // Load global scan counter for social proof
     loadGlobalStats();
@@ -876,7 +1181,7 @@ function init() {
         else showToast('Signed out', 'info');
       }
       _authInitialized = true;
-      if (user) showLoggedInNav(user);
+      if (user) { showLoggedInNav(user); loadUserSettings(user.uid); }
       else showLoggedOutNav();
     });
   }

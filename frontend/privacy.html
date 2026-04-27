@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — Asli</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'asli-green': '#16A34A',
+            'asli-bg': '#F9FAF8',
+            'asli-text': '#1C1C1E',
+            'asli-muted': '#6B7280',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; }
+  </style>
+</head>
+<body class="bg-asli-bg text-asli-text min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-100 sticky top-0 z-10">
+    <div class="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+      <a href="index.html" class="flex items-center gap-2 text-asli-green hover:opacity-80 transition-opacity">
+        <svg width="28" height="28" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="200" height="200" rx="44" fill="url(#g)"/>
+          <defs>
+            <linearGradient id="g" x1="0" y1="0" x2="200" y2="200" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#22C55E"/>
+              <stop offset="100%" stop-color="#15803D"/>
+            </linearGradient>
+          </defs>
+          <text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle"
+                font-family="Noto Sans Devanagari, serif" font-size="110" fill="white">अ</text>
+        </svg>
+        <span class="font-semibold text-lg">Asli</span>
+      </a>
+      <span class="text-asli-muted text-sm ml-1">/ Privacy Policy</span>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main class="max-w-2xl mx-auto px-4 py-10 space-y-8">
+
+    <div>
+      <h1 class="text-2xl font-bold mb-1">Privacy Policy</h1>
+      <p class="text-asli-muted text-sm">Last updated: April 2026 &nbsp;·&nbsp; Effective immediately</p>
+    </div>
+
+    <!-- Section 1 -->
+    <section class="bg-white rounded-2xl border border-gray-100 p-6 space-y-3">
+      <h2 class="font-semibold text-lg flex items-center gap-2">
+        <span class="text-asli-green">📥</span> Data We Collect
+      </h2>
+      <ul class="space-y-2 text-sm text-asli-muted list-disc list-inside">
+        <li>Images you upload for scanning — processed in memory, never stored on our servers.</li>
+        <li>Scan results (verdict, confidence, flags) — stored in your personal Firestore account if you are signed in.</li>
+        <li>A 100×100 pixel thumbnail of each scanned image — stored only in your own Firestore account, visible only to you.</li>
+        <li>Your Google account display name, email, and profile photo — used only to show your avatar in the app.</li>
+        <li>Language preference — saved locally and optionally synced to your Firestore account.</li>
+      </ul>
+    </section>
+
+    <!-- Section 2 -->
+    <section class="bg-white rounded-2xl border border-gray-100 p-6 space-y-3">
+      <h2 class="font-semibold text-lg flex items-center gap-2">
+        <span class="text-asli-green">🚫</span> Data We Don't Collect
+      </h2>
+      <ul class="space-y-2 text-sm text-asli-muted list-disc list-inside">
+        <li>We do <strong class="text-asli-text">not</strong> store your original full-resolution images anywhere.</li>
+        <li>We do <strong class="text-asli-text">not</strong> sell, share, or monetise any of your data.</li>
+        <li>We do <strong class="text-asli-text">not</strong> track you across other websites or apps.</li>
+        <li>We do <strong class="text-asli-text">not</strong> use your images to train AI models.</li>
+      </ul>
+    </section>
+
+    <!-- Section 3 -->
+    <section class="bg-white rounded-2xl border border-gray-100 p-6 space-y-3">
+      <h2 class="font-semibold text-lg flex items-center gap-2">
+        <span class="text-asli-green">⚙️</span> How We Use Your Data
+      </h2>
+      <ul class="space-y-2 text-sm text-asli-muted list-disc list-inside">
+        <li>Images are sent to our backend (FastAPI + Google Gemini) solely to produce an authenticity verdict.</li>
+        <li>Scan history is stored in Firebase Firestore under your unique user ID, accessible only to you (enforced by Firestore Security Rules).</li>
+        <li>A global scan counter (no personal data) is incremented after each scan and displayed as social proof.</li>
+      </ul>
+    </section>
+
+    <!-- Section 4 -->
+    <section class="bg-white rounded-2xl border border-gray-100 p-6 space-y-3">
+      <h2 class="font-semibold text-lg flex items-center gap-2">
+        <span class="text-asli-green">🔑</span> Your Rights
+      </h2>
+      <ul class="space-y-2 text-sm text-asli-muted list-disc list-inside">
+        <li><strong class="text-asli-text">Export</strong> — download a JSON file of all your scan results at any time from Settings → Account.</li>
+        <li><strong class="text-asli-text">Delete</strong> — delete your account and all associated data instantly from Settings → Account. This action is irreversible.</li>
+        <li><strong class="text-asli-text">Guest use</strong> — you may use Asli without signing in; no data is stored in that case.</li>
+      </ul>
+    </section>
+
+    <!-- Section 5 -->
+    <section class="bg-white rounded-2xl border border-gray-100 p-6 space-y-3">
+      <h2 class="font-semibold text-lg flex items-center gap-2">
+        <span class="text-asli-green">✉️</span> Contact
+      </h2>
+      <p class="text-sm text-asli-muted">
+        Questions or concerns? Email us at
+        <a href="mailto:suthardivy183@gmail.com" class="text-asli-green underline hover:no-underline">suthardivy183@gmail.com</a>
+        or open an issue on
+        <a href="https://github.com/suthardivy183-lang/verify-me/issues" class="text-asli-green underline hover:no-underline" target="_blank" rel="noopener">GitHub</a>.
+      </p>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="text-center text-xs text-asli-muted py-8">
+    &copy; 2026 Asli &mdash; MIT License &mdash;
+    <a href="index.html" class="text-asli-green hover:underline">Back to app</a>
+  </footer>
+
+</body>
+</html>
