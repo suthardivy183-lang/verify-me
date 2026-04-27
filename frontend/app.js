@@ -158,6 +158,9 @@ const state = {
   scanIntervalHandle: null,
 };
 
+// Current scan snapshot — populated by renderResult(), consumed by downloadReport()
+let currentScan = null;
+
 function detectLanguage() {
   const stored = localStorage.getItem('asli_lang');
   if (stored && i18n[stored]) return stored;
@@ -401,6 +404,47 @@ function renderResult() {
   setText('tip-text', r.learn_more_tip || '');
   applyScriptFont($('tip-text'), state.language);
 
+  // ── Snapshot for PDF download ──────────────────────────────────────────────
+  currentScan = {
+    verdict:           r.verdict,
+    confidence_pct:    r.confidence_pct,
+    explanation_en:    r.explanation_en    || '',
+    explanation_local: r.explanation_local || '',
+    red_flags:         Array.isArray(r.red_flags) ? r.red_flags : [],
+    learn_more_tip:    r.learn_more_tip    || '',
+    language:          state.language,
+    imageDataUrl:      null,
+    fileName:          state.selectedFile ? state.selectedFile.name : 'image',
+    imageHash:         '',
+    timestamp:         new Date(),
+    firestoreId:       null,
+  };
+  if (state.selectedFile) {
+    const _f = state.selectedFile;
+    Promise.all([resizeImageToBase64(_f, 400, 320), hashImage(_f)])
+      .then(([dataUrl, hash]) => {
+        if (currentScan) { currentScan.imageDataUrl = dataUrl; currentScan.imageHash = hash; }
+      });
+  } else if (state.imagePreviewUrl && state.imagePreviewUrl.startsWith('data:')) {
+    currentScan.imageDataUrl = state.imagePreviewUrl;
+  }
+
+  // ── Download button label + border color ───────────────────────────────────
+  const _pdfBtn = $('download-pdf-btn');
+  if (_pdfBtn) {
+    const PDF_LABELS = {
+      Nakli:      '↓  Download Forensic Report',
+      Asli:       '↓  Download Verification Certificate',
+      'Shak hai': '↓  Download Analysis Report',
+    };
+    const PDF_COLORS = { Nakli: '#DC2626', Asli: '#16A34A', 'Shak hai': '#D97706' };
+    const _lbl = $('download-pdf-label');
+    if (_lbl) _lbl.textContent = PDF_LABELS[r.verdict] || PDF_LABELS['Shak hai'];
+    const _c = PDF_COLORS[r.verdict] || PDF_COLORS['Shak hai'];
+    _pdfBtn.style.color = _c;
+    _pdfBtn.style.borderColor = _c;
+  }
+
   showScreen('result');
 
   // Save-to-history banner: show for guests, hide for signed-in users
@@ -473,7 +517,7 @@ async function saveScanToHistory(scanResult, imageFile) {
       resizeImageToBase64(imageFile, 100, 100),
       hashImage(imageFile),
     ]);
-    await db.collection('users').doc(user.uid).collection('scans').add({
+    const docRef = await db.collection('users').doc(user.uid).collection('scans').add({
       timestamp:         firebase.firestore.FieldValue.serverTimestamp(),
       imageHash,
       imageThumbnail:    thumbnail,
@@ -486,6 +530,7 @@ async function saveScanToHistory(scanResult, imageFile) {
       language:          state.language,
       fileName:          imageFile.name               || 'image',
     });
+    if (currentScan) currentScan.firestoreId = docRef.id;
     showToast('✓ Result saved to your history', 'success');
   } catch (err) {
     console.error('Failed to save scan:', err);
@@ -630,12 +675,13 @@ function renderHistoryList(docs) {
       `<p class="text-xs text-asli-muted truncate mb-2">${escapeHtml((d.fileName || 'image').slice(0, 28))}</p>` +
       `<div class="flex items-center gap-3">` +
         `<button class="history-view-btn text-xs font-semibold text-asli-green hover:underline transition">View Details</button>` +
-        `<button class="text-xs font-medium text-stone-300 cursor-not-allowed" title="Coming soon — Feature 4">Download PDF</button>` +
+        `<button class="history-pdf-btn text-xs font-semibold text-asli-muted hover:text-asli-text hover:underline transition">Download PDF</button>` +
       `</div>`;
 
     card.appendChild(thumb);
     card.appendChild(body);
 
+    card.querySelector('.history-pdf-btn').addEventListener('click', () => downloadReportFromHistory(doc));
     card.querySelector('.history-view-btn').addEventListener('click', () => {
       state.result = {
         verdict:           d.verdict,
@@ -1071,6 +1117,327 @@ function _closeDropdown() {
   _dropdownOpen = false;
 }
 
+// ─── PDF Forensic Report ──────────────────────────────────────────────────────
+
+function getVerdictColor(verdict) {
+  if (verdict === 'Nakli') return { r: 220, g: 38,  b: 38  };
+  if (verdict === 'Asli')  return { r: 22,  g: 163, b: 74  };
+  return                          { r: 217, g: 119, b: 6   };
+}
+
+function getVerdictLabel(verdict) {
+  if (verdict === 'Nakli')    return 'LIKELY AI-GENERATED (NAKLI)';
+  if (verdict === 'Asli')     return 'VERIFIED AUTHENTIC (ASLI)';
+  if (verdict === 'Shak hai') return 'UNCERTAIN — NEEDS REVIEW';
+  return verdict.toUpperCase();
+}
+
+function addSectionHeader(doc, title, y, margin, contentW) {
+  doc.setTextColor(120, 120, 120);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text(title, margin, y);
+  doc.setDrawColor(230, 230, 230);
+  doc.setLineWidth(0.3);
+  doc.line(margin, y + 1.5, margin + contentW, y + 1.5);
+  return y + 7;
+}
+
+function addBodyText(doc, text, y, margin, contentW) {
+  doc.setTextColor(40, 40, 40);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  const lines = doc.splitTextToSize(text || '', contentW);
+  doc.text(lines, margin, y);
+  return y + (lines.length * 5.5);
+}
+
+function addBulletPoint(doc, text, y, margin, contentW) {
+  doc.setTextColor(40, 40, 40);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('•', margin, y);
+  const lines = doc.splitTextToSize(text, contentW - 6);
+  doc.text(lines, margin + 6, y);
+  return y + (lines.length * 5.5) + 1;
+}
+
+async function addLocalLanguageSection(doc, text, y, margin, contentW) {
+  const canvas = document.createElement('canvas');
+  canvas.width  = Math.round(contentW * 3.78);
+  canvas.height = 120;
+  const ctx = canvas.getContext('2d');
+  const fontSize = 28;
+  const maxWidth = canvas.width - 20;
+
+  ctx.font = `${fontSize}px "Noto Sans Devanagari", "Noto Sans Gujarati", sans-serif`;
+  const words = text.split(' ');
+
+  // First pass: measure the total height needed
+  let line = '', lineY = 40;
+  words.forEach(word => {
+    const test = line + word + ' ';
+    if (ctx.measureText(test).width > maxWidth && line) { line = word + ' '; lineY += 36; }
+    else line = test;
+  });
+  const totalH = lineY + 20;
+
+  // Set final height and re-render (height change clears the canvas)
+  canvas.height = totalH;
+  ctx.fillStyle = '#f9fafb';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#1c1917';
+  ctx.font = `${fontSize}px "Noto Sans Devanagari", "Noto Sans Gujarati", sans-serif`;
+
+  line = ''; lineY = 40;
+  words.forEach(word => {
+    const test = line + word + ' ';
+    if (ctx.measureText(test).width > maxWidth && line) {
+      ctx.fillText(line.trim(), 10, lineY);
+      line = word + ' ';
+      lineY += 36;
+    } else {
+      line = test;
+    }
+  });
+  if (line) ctx.fillText(line.trim(), 10, lineY);
+
+  const imgData     = canvas.toDataURL('image/png');
+  const imgHeightMM = totalH / 3.78;
+  doc.addImage(imgData, 'PNG', margin, y, contentW, imgHeightMM);
+  return y + imgHeightMM + 4;
+}
+
+async function downloadReportFromHistory(scanDoc) {
+  const data = scanDoc.data();
+  const prev  = currentScan;
+  currentScan = {
+    verdict:           data.verdict,
+    confidence_pct:    data.confidence_pct,
+    explanation_en:    data.explanation_en    || '',
+    explanation_local: data.explanation_local || '',
+    red_flags:         data.red_flags         || [],
+    learn_more_tip:    data.learn_more_tip    || '',
+    language:          data.language          || 'en',
+    imageDataUrl:      data.imageThumbnail    || null,
+    fileName:          data.fileName          || 'image',
+    imageHash:         data.imageHash         || '',
+    timestamp:         data.timestamp?.toDate() || new Date(),
+    firestoreId:       scanDoc.id,
+  };
+  await downloadReport();
+  currentScan = prev;
+}
+
+async function downloadReport() {
+  if (!currentScan) return;
+  if (!window.jspdf) {
+    showToast('PDF library not loaded — try refreshing the page', 'error');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  const W        = 210;
+  const MARGIN   = 20;
+  const CW       = W - MARGIN * 2; // content width
+  let   y        = 0;
+
+  const hColor = getVerdictColor(currentScan.verdict);
+  const isAsli = currentScan.verdict === 'Asli';
+
+  // ═══ HEADER BAND ═══
+  doc.setFillColor(hColor.r, hColor.g, hColor.b);
+  doc.rect(0, 0, W, 28, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.text(
+    isAsli ? 'Asli — Digital Verification Certificate'
+           : 'Asli — Digital Authenticity Report',
+    MARGIN, 12
+  );
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('asli.web.app  |  Built for Google Solution Challenge 2026', MARGIN, 20);
+
+  y = 36;
+
+  // ═══ REPORT METADATA ═══
+  const reportId = 'ASLI-' + currentScan.timestamp
+    .toISOString().replace(/[-:.TZ]/g, '').substring(0, 12);
+  const dateStr = currentScan.timestamp.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  }) + ' IST';
+
+  doc.setTextColor(100, 100, 100);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Report ID: ${reportId}`,    MARGIN, y);
+  doc.text(`Generated: ${dateStr}`,     MARGIN, y + 5);
+  doc.text(`File: ${currentScan.fileName}`, MARGIN, y + 10);
+  doc.text(`Hash: ${currentScan.imageHash || '—'}`, MARGIN, y + 15);
+  doc.text('Analyzed by: Asli v1.0 (Google Cloud Run + Gemini API)', MARGIN, y + 20);
+
+  y += 30;
+
+  // ═══ VERDICT BOX ═══
+  doc.setDrawColor(hColor.r, hColor.g, hColor.b);
+  doc.setLineWidth(0.8);
+  doc.setFillColor(
+    Math.min(255, hColor.r + 200),
+    Math.min(255, hColor.g + 200),
+    Math.min(255, hColor.b + 200)
+  );
+  doc.roundedRect(MARGIN, y, CW, 22, 3, 3, 'FD');
+
+  doc.setTextColor(hColor.r, hColor.g, hColor.b);
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(getVerdictLabel(currentScan.verdict), MARGIN + 6, y + 10);
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Confidence: ${currentScan.confidence_pct}%`, MARGIN + 6, y + 17);
+
+  y += 30;
+
+  // ═══ IMAGE THUMBNAIL ═══
+  if (currentScan.imageDataUrl) {
+    try {
+      doc.addImage(currentScan.imageDataUrl, 'JPEG', MARGIN, y, 45, 45, '', 'MEDIUM');
+      doc.setTextColor(60, 60, 60);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Image under analysis:', MARGIN + 50, y + 5);
+      doc.setFont('helvetica', 'bold');
+      doc.text(currentScan.fileName, MARGIN + 50, y + 11);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Verdict: ${currentScan.verdict}`,         MARGIN + 50, y + 17);
+      doc.text(`Confidence: ${currentScan.confidence_pct}%`, MARGIN + 50, y + 23);
+      y += 52;
+    } catch (_) {
+      y += 5;
+    }
+  }
+
+  // ═══ ANALYSIS SUMMARY ═══
+  y = addSectionHeader(doc,
+    isAsli ? 'WHY THIS IMAGE APPEARS AUTHENTIC' : 'ANALYSIS SUMMARY',
+    y, MARGIN, CW);
+  y = addBodyText(doc, currentScan.explanation_en || 'No explanation available.', y, MARGIN, CW);
+  y += 6;
+
+  // ═══ LOCAL LANGUAGE SECTION (canvas-rendered Devanagari / Gujarati) ═══
+  if (currentScan.language !== 'en' && currentScan.explanation_local) {
+    const localLabel = currentScan.language === 'hi' ? 'HINDI SUMMARY' : 'GUJARATI SUMMARY';
+    y = addSectionHeader(doc, localLabel, y, MARGIN, CW);
+    y = await addLocalLanguageSection(doc, currentScan.explanation_local, y, MARGIN, CW);
+  }
+
+  // ═══ DETECTED SIGNALS ═══
+  if (currentScan.red_flags && currentScan.red_flags.length > 0) {
+    if (y > 220) { doc.addPage(); y = 20; }
+    y = addSectionHeader(doc, 'DETECTED SIGNALS', y, MARGIN, CW);
+    currentScan.red_flags.forEach(flag => {
+      y = addBulletPoint(doc, flag, y, MARGIN, CW);
+    });
+    y += 6;
+  }
+
+  // ═══ DETECTION METHOD ═══
+  if (y > 220) { doc.addPage(); y = 20; }
+  y = addSectionHeader(doc, 'DETECTION METHOD', y, MARGIN, CW);
+  y = addBodyText(doc,
+    'This image was analyzed by a three-model deep learning ensemble: ' +
+    '(1) EfficientNet fine-tuned for AI image detection, ' +
+    '(2) Vision Transformer for diffusion-era artifacts, and ' +
+    '(3) a diffusion-specialist model covering Stable Diffusion, ' +
+    'Midjourney, and DALL-E outputs. ' +
+    'Results were combined using weighted ensemble scoring and ' +
+    'explained by Google Gemini API.',
+    y, MARGIN, CW);
+  y += 6;
+
+  // ═══ MEDIA LITERACY TIP ═══
+  if (y > 230) { doc.addPage(); y = 20; }
+  y = addSectionHeader(doc, 'HOW TO VERIFY NEXT TIME', y, MARGIN, CW);
+  y = addBodyText(doc, currentScan.learn_more_tip || '', y, MARGIN, CW);
+  y += 6;
+
+  // ═══ WHAT TO DO (Nakli only) ═══
+  if (currentScan.verdict === 'Nakli') {
+    if (y > 210) { doc.addPage(); y = 20; }
+    y = addSectionHeader(doc, 'WHAT TO DO IF YOU RECEIVED THIS', y, MARGIN, CW);
+    const actions = [
+      'Do not send money or share personal information based on this image or video.',
+      'Call the person directly on their known/saved phone number to verify.',
+      'Report to National Cyber Crime Helpline: dial 1930 (free, 24/7).',
+      'File a report online at: cybercrime.gov.in',
+      'Warn family members who may have received the same image.',
+    ];
+    actions.forEach((action, i) => {
+      y = addBulletPoint(doc, `${i + 1}. ${action}`, y, MARGIN, CW);
+    });
+    y += 6;
+  }
+
+  // ═══ AUTHENTICITY NOTICE (Asli only) ═══
+  if (isAsli) {
+    if (y > 230) { doc.addPage(); y = 20; }
+    y = addSectionHeader(doc, 'IMPORTANT NOTICE', y, MARGIN, CW);
+    y = addBodyText(doc,
+      'This certificate indicates that our AI ensemble found no significant ' +
+      'synthetic-media artifacts in this image at the time of analysis. This is not a ' +
+      'guarantee of authenticity — AI detection is not 100% accurate. When in doubt, ' +
+      'verify through multiple independent sources.',
+      y, MARGIN, CW);
+    y += 6;
+  }
+
+  // ═══ FOOTER ═══
+  if (y > 260) { doc.addPage(); y = 20; }
+  doc.setDrawColor(220, 220, 220);
+  doc.setLineWidth(0.3);
+  doc.line(MARGIN, y, W - MARGIN, y);
+  y += 6;
+
+  doc.setTextColor(150, 150, 150);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.text(
+    'This report was generated by Asli — a free public-good tool built for Google Solution Challenge 2026.',
+    MARGIN, y, { maxWidth: CW }
+  );
+  y += 5;
+  doc.text(
+    'Asli is not a legal instrument. For legal matters, consult a certified digital forensics expert.',
+    MARGIN, y, { maxWidth: CW }
+  );
+  y += 5;
+  doc.text(`asli.web.app  |  SDG 16 + SDG 10  |  Report ID: ${reportId}`, MARGIN, y);
+
+  // ═══ SAVE ═══
+  const filename =
+    `Asli_Report_${currentScan.verdict.replace(/ /g, '_')}_` +
+    `${currentScan.timestamp.toISOString().split('T')[0]}_` +
+    `${currentScan.imageHash || 'nohash'}.pdf`;
+
+  doc.save(filename);
+  showToast('Report downloaded', 'success');
+
+  // Flag pdf_downloaded in Firestore (best-effort)
+  if (_firebaseReady && auth && auth.currentUser && currentScan.firestoreId) {
+    db.collection('users').doc(auth.currentUser.uid)
+      .collection('scans').doc(currentScan.firestoreId)
+      .update({ pdf_downloaded: true }).catch(() => {});
+  }
+}
+
 // ─── Wire up ─────────────────────────────────────────────────────────────
 function init() {
   applyLanguage();
@@ -1133,6 +1500,7 @@ function init() {
 
   $('scan-another-btn').addEventListener('click', reset);
   $('share-btn').addEventListener('click', shareWhatsApp);
+  $('download-pdf-btn').addEventListener('click', downloadReport);
   $('retry-btn').addEventListener('click', () => {
     if (state.selectedFile) uploadAndScan(state.selectedFile);
     else reset();
