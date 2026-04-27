@@ -110,7 +110,7 @@
             id="auth-dropdown"
             class="hidden absolute right-0 top-full mt-2 bg-white border border-stone-200 rounded-xl shadow-xl min-w-[180px] py-1 z-50"
             role="menu">
-            <button class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-stone-50 flex items-center gap-2.5 transition" role="menuitem">
+            <button id="my-scans-btn" class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-stone-50 flex items-center gap-2.5 transition" role="menuitem">
               <span aria-hidden="true">📋</span> My Scans
             </button>
             <button class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-stone-50 flex items-center gap-2.5 transition" role="menuitem">
@@ -169,6 +169,9 @@
           <span id="camera-text">Take a photo</span>
         </label>
         <input id="camera-input" type="file" accept="image/*" capture="environment" class="sr-only" />
+
+        <!-- Social proof counter (populated from Firestore stats/global) -->
+        <p id="global-stats" class="text-center text-xs text-asli-muted mt-5"></p>
       </div>
 
       <!-- Sub-state 2: READY-TO-EVALUATE (file picked, awaiting confirmation) -->
@@ -304,6 +307,22 @@
   <footer class="text-center text-xs text-asli-muted py-4 px-4">
     <span id="footer-text"></span>
   </footer>
+
+  <!-- ─── History panel (off-canvas, slides in from right) ─── -->
+  <div id="history-panel" class="off-canvas-panel" role="dialog" aria-modal="true" aria-label="My Scans">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-stone-200 shrink-0">
+      <h2 class="text-base font-bold text-asli-text">My Scans</h2>
+      <button id="close-history" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-stone-100 text-asli-muted transition" aria-label="Close panel">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+    <!-- Stats bar: Total / Fake / Real / Uncertain counts -->
+    <div id="history-stats-bar" class="px-5 py-2.5 text-xs flex items-center gap-4 bg-stone-50 border-b border-stone-100 shrink-0 min-h-[36px]"></div>
+    <!-- Scrollable scan list -->
+    <div id="history-list" class="flex-1 overflow-y-auto px-4 py-3 space-y-3"></div>
+  </div>
+  <!-- Dim overlay behind the panel -->
+  <div id="panel-overlay"></div>
 
   <script src="app.js"></script>
 </body>

@@ -335,6 +335,11 @@ async function uploadAndScan(file, opts = {}) {
     state.result = data;
     stopScanStatusRotation();
     renderResult();
+    // Fire-and-forget — never block the result display
+    if (_firebaseReady) {
+      saveScanToHistory(data, file);
+      incrementGlobalStats(data.verdict);
+    }
   } catch (err) {
     stopScanStatusRotation();
     const t = i18n[state.language];
@@ -426,6 +431,228 @@ function reset() {
   $('camera-input').value = '';
   showPickState();
   showScreen('upload');
+}
+
+// ─── Firestore helpers ────────────────────────────────────────────────────────
+
+function resizeImageToBase64(file, maxW, maxH) {
+  return new Promise(resolve => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+      const canvas = document.createElement('canvas');
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(''); };
+    img.src = url;
+  });
+}
+
+async function hashImage(file) {
+  try {
+    const buf  = await file.arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(hash))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+      .substring(0, 16);
+  } catch (e) { return ''; }
+}
+
+async function saveScanToHistory(scanResult, imageFile) {
+  if (!_firebaseReady || !db) return;
+  const user = auth.currentUser;
+  if (!user) return;
+  try {
+    const [thumbnail, imageHash] = await Promise.all([
+      resizeImageToBase64(imageFile, 100, 100),
+      hashImage(imageFile),
+    ]);
+    await db.collection('users').doc(user.uid).collection('scans').add({
+      timestamp:         firebase.firestore.FieldValue.serverTimestamp(),
+      imageHash,
+      imageThumbnail:    thumbnail,
+      verdict:           scanResult.verdict,
+      confidence_pct:    scanResult.confidence_pct,
+      explanation_en:    scanResult.explanation_en    || '',
+      explanation_local: scanResult.explanation_local || '',
+      red_flags:         scanResult.red_flags         || [],
+      learn_more_tip:    scanResult.learn_more_tip    || '',
+      language:          state.language,
+      fileName:          imageFile.name               || 'image',
+    });
+    showToast('✓ Result saved to your history', 'success');
+  } catch (err) {
+    console.error('Failed to save scan:', err);
+  }
+}
+
+async function incrementGlobalStats(verdict) {
+  if (!_firebaseReady || !db) return;
+  try {
+    await db.collection('stats').doc('global').set({
+      total_scans:   firebase.firestore.FieldValue.increment(1),
+      fake_detected: firebase.firestore.FieldValue.increment(verdict === 'Nakli' ? 1 : 0),
+      real_verified: firebase.firestore.FieldValue.increment(verdict === 'Asli'  ? 1 : 0),
+    }, { merge: true });
+  } catch (e) { /* silent */ }
+}
+
+async function loadGlobalStats() {
+  if (!_firebaseReady || !db) return;
+  try {
+    const doc = await db.collection('stats').doc('global').get();
+    if (doc.exists) {
+      const { total_scans = 0 } = doc.data();
+      const el = $('global-stats');
+      if (el && total_scans > 0) {
+        el.textContent = `\u{1F6E1} ${total_scans.toLocaleString('en-IN')} images verified by Asli users`;
+      }
+    }
+  } catch (e) { /* silent */ }
+}
+
+// ─── History panel ────────────────────────────────────────────────────────────
+
+async function openHistoryPanel() {
+  if (!_firebaseReady) return;
+  const user = auth ? auth.currentUser : null;
+  if (!user) { showToast('Sign in to view your scan history', 'info'); return; }
+
+  _closeDropdown();
+  $('history-panel').classList.add('open');
+  $('panel-overlay').classList.add('show');
+  if (window.lucide) lucide.createIcons();
+
+  const list = $('history-list');
+  list.innerHTML = '<p class="text-center text-asli-muted text-sm py-10">Loading…</p>';
+  $('history-stats-bar').innerHTML = '';
+
+  try {
+    const snapshot = await db.collection('users').doc(user.uid)
+      .collection('scans')
+      .orderBy('timestamp', 'desc')
+      .limit(50)
+      .get();
+    renderHistoryStats(snapshot.docs);
+    renderHistoryList(snapshot.docs);
+  } catch (err) {
+    list.innerHTML = '<p class="text-center text-red-500 text-sm py-10">Failed to load history.</p>';
+    console.error('History load error:', err);
+  }
+}
+
+function closeHistoryPanel() {
+  const panel   = $('history-panel');
+  const overlay = $('panel-overlay');
+  if (panel)   panel.classList.remove('open');
+  if (overlay) overlay.classList.remove('show');
+}
+
+function _formatRelativeDate(ts) {
+  if (!ts) return '';
+  const date  = ts.toDate ? ts.toDate() : new Date(ts);
+  const now   = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yest  = new Date(today.getTime() - 86400000);
+  const dayOf = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const t     = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  if (dayOf.getTime() === today.getTime()) return `Today ${t}`;
+  if (dayOf.getTime() === yest.getTime())  return `Yesterday ${t}`;
+  return date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+}
+
+function renderHistoryStats(docs) {
+  const bar = $('history-stats-bar');
+  if (!bar) return;
+  const c = { Asli: 0, Nakli: 0, 'Shak hai': 0 };
+  docs.forEach(d => { const v = d.data().verdict; if (v in c) c[v]++; });
+  if (docs.length === 0) { bar.innerHTML = ''; return; }
+  bar.innerHTML =
+    `<span class="font-medium text-asli-text">Total: ${docs.length}</span>` +
+    `<span style="color:#DC2626">\u{1F534} Fake: ${c['Nakli']}</span>` +
+    `<span style="color:#16A34A">\u{1F7E2} Real: ${c['Asli']}</span>` +
+    `<span style="color:#D97706">\u{1F7E1} Uncertain: ${c['Shak hai']}</span>`;
+}
+
+function renderHistoryList(docs) {
+  const list = $('history-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  if (docs.length === 0) {
+    list.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-16 text-center">
+        <span class="text-5xl mb-4">🔍</span>
+        <p class="font-semibold text-asli-text mb-1">No scans yet</p>
+        <p class="text-sm text-asli-muted mb-5">Upload an image to start verifying</p>
+        <button id="history-scan-now-btn"
+          class="rounded-xl bg-asli-green text-white font-semibold px-6 py-2.5 text-sm hover:bg-green-700 transition">
+          Scan now
+        </button>
+      </div>`;
+    const btn = $('history-scan-now-btn');
+    if (btn) btn.addEventListener('click', () => { closeHistoryPanel(); showScreen('upload'); });
+    return;
+  }
+
+  const BADGE = {
+    Asli:       'background:#DCFCE7;color:#16A34A',
+    Nakli:      'background:#FEE2E2;color:#DC2626',
+    'Shak hai': 'background:#FEF3C7;color:#D97706',
+  };
+
+  docs.forEach(doc => {
+    const d         = doc.data();
+    const badgeStyle = BADGE[d.verdict] || BADGE['Shak hai'];
+    const card      = document.createElement('div');
+    card.className  = 'bg-white rounded-xl border border-stone-200 p-3 flex gap-3 items-start';
+
+    const thumb = document.createElement('img');
+    thumb.src   = d.imageThumbnail || '';
+    thumb.alt   = '';
+    thumb.className = 'rounded-lg object-cover bg-stone-100 shrink-0';
+    thumb.style.cssText = 'width:60px;height:60px;';
+
+    const body = document.createElement('div');
+    body.className = 'flex-1 min-w-0';
+    body.innerHTML =
+      `<div class="flex items-center justify-between gap-2 mb-1">` +
+        `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold" style="${escapeHtml(badgeStyle)}">${escapeHtml(d.verdict || '—')}</span>` +
+        `<span class="text-xs text-asli-muted shrink-0">${escapeHtml(_formatRelativeDate(d.timestamp))}</span>` +
+      `</div>` +
+      `<p class="text-sm font-medium text-asli-text">${escapeHtml(String(d.confidence_pct ?? '—'))}% confidence</p>` +
+      `<p class="text-xs text-asli-muted truncate mb-2">${escapeHtml((d.fileName || 'image').slice(0, 28))}</p>` +
+      `<div class="flex items-center gap-3">` +
+        `<button class="history-view-btn text-xs font-semibold text-asli-green hover:underline transition">View Details</button>` +
+        `<button class="text-xs font-medium text-stone-300 cursor-not-allowed" title="Coming soon — Feature 4">Download PDF</button>` +
+      `</div>`;
+
+    card.appendChild(thumb);
+    card.appendChild(body);
+
+    card.querySelector('.history-view-btn').addEventListener('click', () => {
+      state.result = {
+        verdict:           d.verdict,
+        confidence_pct:    d.confidence_pct,
+        explanation_en:    d.explanation_en,
+        explanation_local: d.explanation_local,
+        red_flags:         d.red_flags || [],
+        learn_more_tip:    d.learn_more_tip,
+      };
+      state.imagePreviewUrl = d.imageThumbnail || null;
+      state.selectedFile    = null;
+      closeHistoryPanel();
+      renderResult();
+    });
+
+    list.appendChild(card);
+  });
 }
 
 // ─── Toast ───────────────────────────────────────────────────────────────────
@@ -623,10 +850,23 @@ function init() {
       if (_dropdownOpen && !$('auth-area').contains(e.target)) _closeDropdown();
     });
 
-    // Close dropdown on Escape
+    // Close dropdown or history panel on Escape
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && _dropdownOpen) _closeDropdown();
+      if (e.key === 'Escape') {
+        if (_dropdownOpen) _closeDropdown();
+        closeHistoryPanel();
+      }
     });
+
+    // My Scans → open history panel
+    $('my-scans-btn').addEventListener('click', () => openHistoryPanel());
+
+    // History panel close controls
+    $('close-history').addEventListener('click', closeHistoryPanel);
+    $('panel-overlay').addEventListener('click', closeHistoryPanel);
+
+    // Load global scan counter for social proof
+    loadGlobalStats();
 
     // Track auth state; only show toast on actual sign-in/sign-out, not page-load restore
     let _authInitialized = false;
