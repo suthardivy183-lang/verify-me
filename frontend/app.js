@@ -4,6 +4,42 @@
 
 const API_BASE = (window.ASLI_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
+// ─── Firebase config ──────────────────────────────────────────────────────────
+// Replace ALL placeholder values with your project's config:
+//   console.firebase.google.com → Project Settings → Your apps → SDK setup and config
+//
+// TO TEST:
+// 1. Replace placeholder values below with your real Firebase config
+// 2. Enable Google provider: Firebase Console → Authentication → Sign-in method → Google → Enable
+// 3. Add authorized domains: Authentication → Settings → Authorized domains
+//    (add "localhost" for local dev + your Firebase Hosting URL for prod)
+// 4. Open frontend, click "Sign in" — Google popup should appear
+// 5. Verify navbar switches to avatar + first name state
+// 6. Refresh page — user should still be logged in (Firebase persists session)
+// 7. Click name → dropdown → "Sign out" — verify reverts to sign-in button
+const firebaseConfig = {
+  apiKey:            'YOUR_API_KEY',
+  authDomain:        'YOUR_PROJECT_ID.firebaseapp.com',
+  projectId:         'YOUR_PROJECT_ID',
+  storageBucket:     'YOUR_PROJECT_ID.appspot.com',
+  messagingSenderId: 'YOUR_SENDER_ID',
+  appId:             'YOUR_APP_ID',
+};
+
+let _firebaseReady = false;
+let auth = null;
+let db   = null;
+
+try {
+  firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth();
+  db   = firebase.firestore();
+  _firebaseReady = true;
+} catch (e) {
+  // Firebase unavailable — guest-only mode, scan flow unaffected
+  console.warn('Firebase init skipped (placeholder config or SDK error):', e.message);
+}
+
 // ─── i18n strings ──────────────────────────────────────────────────────────
 const i18n = {
   hi: {
@@ -361,6 +397,10 @@ function renderResult() {
   applyScriptFont($('tip-text'), state.language);
 
   showScreen('result');
+
+  // Save-to-history banner: show for guests, hide for signed-in users
+  const currentUser = _firebaseReady && auth ? auth.currentUser : null;
+  _updateSaveBanner(currentUser);
 }
 
 // ─── Share intent ────────────────────────────────────────────────────────
@@ -386,6 +426,122 @@ function reset() {
   $('camera-input').value = '';
   showPickState();
   showScreen('upload');
+}
+
+// ─── Toast ───────────────────────────────────────────────────────────────────
+function showToast(message, type = 'info') {
+  const palette = {
+    info:    'background:#1c1917;color:#fff',
+    success: 'background:#16A34A;color:#fff',
+    error:   'background:#DC2626;color:#fff',
+  };
+  const toast = document.createElement('div');
+  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
+  toast.style.cssText = [
+    'position:fixed',
+    'bottom:calc(1.5rem + env(safe-area-inset-bottom))',
+    'left:50%',
+    'transform:translateX(-50%)',
+    'padding:10px 22px',
+    'border-radius:9999px',
+    'font-size:14px',
+    'font-weight:500',
+    'font-family:Inter,system-ui,sans-serif',
+    'box-shadow:0 4px 16px rgba(0,0,0,0.18)',
+    'z-index:9999',
+    'white-space:nowrap',
+    'transition:opacity 280ms ease,transform 280ms ease',
+    palette[type] || palette.info,
+  ].join(';');
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  const timer = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(-50%) translateY(8px)';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+  toast.addEventListener('click', () => { clearTimeout(timer); toast.remove(); });
+}
+
+// ─── Auth — nav state ─────────────────────────────────────────────────────────
+function showLoggedInNav(user) {
+  const signinBtn = $('auth-signin-btn');
+  const userBtn   = $('auth-user-btn');
+  if (!signinBtn || !userBtn) return;
+  signinBtn.classList.add('hidden');
+  userBtn.classList.remove('hidden');
+  userBtn.classList.add('flex');
+  const avatar = $('auth-avatar');
+  if (avatar) {
+    avatar.src = user.photoURL || '';
+    avatar.style.display = user.photoURL ? '' : 'none';
+  }
+  const username = $('auth-username');
+  if (username) username.textContent = (user.displayName || user.email || '').split(' ')[0];
+  if (window.lucide) lucide.createIcons();
+  _updateSaveBanner(user);
+}
+
+function showLoggedOutNav() {
+  const signinBtn = $('auth-signin-btn');
+  const userBtn   = $('auth-user-btn');
+  if (!signinBtn || !userBtn) return;
+  userBtn.classList.add('hidden');
+  userBtn.classList.remove('flex');
+  signinBtn.classList.remove('hidden');
+  _closeDropdown();
+  _updateSaveBanner(null);
+}
+
+function _updateSaveBanner(user) {
+  const banner = $('save-banner');
+  if (!banner || state.screen !== 'result') return;
+  if (user) {
+    banner.classList.add('hidden');
+    banner.classList.remove('flex');
+  } else {
+    banner.classList.remove('hidden');
+    banner.classList.add('flex');
+  }
+}
+
+// ─── Auth — sign-in / sign-out ────────────────────────────────────────────────
+function signIn() {
+  if (!_firebaseReady) return;
+  auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())
+    .catch(err => {
+      console.error('Sign in failed:', err);
+      showToast('Sign in failed. Please try again.', 'error');
+    });
+}
+
+function signOut() {
+  if (!_firebaseReady) return;
+  auth.signOut().catch(err => console.error('Sign out failed:', err));
+}
+
+// ─── Dropdown ─────────────────────────────────────────────────────────────────
+let _dropdownOpen = false;
+
+function _toggleDropdown() { _dropdownOpen ? _closeDropdown() : _openDropdown(); }
+
+function _openDropdown() {
+  const dd  = $('auth-dropdown');
+  const btn = $('auth-user-btn');
+  if (!dd) return;
+  dd.classList.remove('hidden');
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+  _dropdownOpen = true;
+}
+
+function _closeDropdown() {
+  const dd  = $('auth-dropdown');
+  const btn = $('auth-user-btn');
+  if (!dd) return;
+  dd.classList.add('hidden');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  _dropdownOpen = false;
 }
 
 // ─── Wire up ─────────────────────────────────────────────────────────────
@@ -454,6 +610,36 @@ function init() {
     if (state.selectedFile) uploadAndScan(state.selectedFile);
     else reset();
   });
+
+  // ─── Auth wiring ──────────────────────────────────────────────────────────
+  if (_firebaseReady) {
+    $('auth-signin-btn').addEventListener('click', signIn);
+    $('auth-user-btn').addEventListener('click', _toggleDropdown);
+    $('auth-signout-btn').addEventListener('click', () => { _closeDropdown(); signOut(); });
+    $('save-banner-signin-btn').addEventListener('click', signIn);
+
+    // Close dropdown on outside click
+    document.addEventListener('click', e => {
+      if (_dropdownOpen && !$('auth-area').contains(e.target)) _closeDropdown();
+    });
+
+    // Close dropdown on Escape
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && _dropdownOpen) _closeDropdown();
+    });
+
+    // Track auth state; only show toast on actual sign-in/sign-out, not page-load restore
+    let _authInitialized = false;
+    auth.onAuthStateChanged(user => {
+      if (_authInitialized) {
+        if (user) showToast(`Signed in as ${(user.displayName || '').split(' ')[0]}`, 'success');
+        else showToast('Signed out', 'info');
+      }
+      _authInitialized = true;
+      if (user) showLoggedInNav(user);
+      else showLoggedOutNav();
+    });
+  }
 
   if (window.lucide) lucide.createIcons();
 }

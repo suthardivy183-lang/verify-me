@@ -46,6 +46,11 @@
   <!-- Lucide icons via CDN -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
 
+  <!-- Firebase SDK (compat mode — no build step required) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
   <link rel="stylesheet" href="styles.css" />
 
   <!-- API endpoint — change this after Cloud Run deploy -->
@@ -62,10 +67,65 @@
         <img src="assets/logo.svg" alt="Asli" class="w-8 h-8" />
         <span class="font-extrabold text-lg tracking-tight">Asli</span>
       </div>
-      <div class="flex items-center gap-1 text-sm bg-white border border-stone-200 rounded-full p-0.5">
-        <button data-lang="hi" class="lang-btn px-3 py-1 rounded-full font-semibold font-deva transition">हिं</button>
-        <button data-lang="gu" class="lang-btn px-3 py-1 rounded-full font-semibold font-guja transition">ગુ</button>
-        <button data-lang="en" class="lang-btn px-3 py-1 rounded-full font-semibold transition">EN</button>
+      <div class="flex items-center gap-2">
+        <!-- Language toggle pill -->
+        <div class="flex items-center gap-1 text-sm bg-white border border-stone-200 rounded-full p-0.5">
+          <button data-lang="hi" class="lang-btn px-3 py-1 rounded-full font-semibold font-deva transition">हिं</button>
+          <button data-lang="gu" class="lang-btn px-3 py-1 rounded-full font-semibold font-guja transition">ગુ</button>
+          <button data-lang="en" class="lang-btn px-3 py-1 rounded-full font-semibold transition">EN</button>
+        </div>
+
+        <!-- ─── Auth area ─── -->
+        <div id="auth-area" class="relative">
+
+          <!-- LOGGED-OUT: Sign in with Google button -->
+          <button
+            id="auth-signin-btn"
+            class="flex items-center gap-1.5 bg-white border border-[#dadce0] rounded-lg px-3 py-1.5 text-xs font-medium text-[#3c4043] hover:bg-gray-50 active:bg-gray-100 transition select-none"
+            style="min-height:36px">
+            <!-- Real Google G (brand colours) -->
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            Sign in
+          </button>
+
+          <!-- LOGGED-IN: Avatar + first name + chevron -->
+          <button
+            id="auth-user-btn"
+            class="hidden items-center gap-1.5 rounded-full hover:bg-stone-100 active:bg-stone-200 px-2 py-1 transition select-none"
+            style="min-height:36px"
+            aria-haspopup="true"
+            aria-expanded="false">
+            <img id="auth-avatar" class="w-7 h-7 rounded-full object-cover bg-stone-200 shrink-0" alt="Profile" />
+            <span id="auth-username" class="text-sm font-medium max-w-[72px] truncate text-asli-text"></span>
+            <i data-lucide="chevron-down" class="w-4 h-4 text-asli-muted shrink-0"></i>
+          </button>
+
+          <!-- Dropdown menu -->
+          <div
+            id="auth-dropdown"
+            class="hidden absolute right-0 top-full mt-2 bg-white border border-stone-200 rounded-xl shadow-xl min-w-[180px] py-1 z-50"
+            role="menu">
+            <button class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-stone-50 flex items-center gap-2.5 transition" role="menuitem">
+              <span aria-hidden="true">📋</span> My Scans
+            </button>
+            <button class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-stone-50 flex items-center gap-2.5 transition" role="menuitem">
+              <span aria-hidden="true">⚙️</span> Settings
+            </button>
+            <div class="border-t border-stone-100 my-1" role="separator"></div>
+            <button
+              id="auth-signout-btn"
+              class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition"
+              role="menuitem">
+              Sign out
+            </button>
+          </div>
+        </div>
+        <!-- ─── /Auth area ─── -->
       </div>
     </div>
   </header>
@@ -202,6 +262,15 @@
             <p id="tip-text" class="text-amber-900 leading-relaxed text-sm"></p>
           </div>
         </div>
+      </div>
+
+      <!-- Save-to-history banner (guests only, shown after scan completes) -->
+      <div
+        id="save-banner"
+        class="hidden items-center justify-between gap-3 rounded-xl px-4 py-3 mb-4"
+        style="background:#EFF6FF;border:1px solid #BFDBFE;">
+        <span class="text-sm text-blue-800">💾 Sign in to save this result to your history</span>
+        <button id="save-banner-signin-btn" class="text-sm font-semibold text-blue-700 hover:underline shrink-0 transition">Sign in</button>
       </div>
 
       <!-- Action buttons -->
