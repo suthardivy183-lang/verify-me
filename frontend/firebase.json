@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "asli-solution-challenge",
     "public": ".",
     "ignore": [
       "node_modules/**",

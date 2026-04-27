@@ -58,17 +58,8 @@ ENV PATH="/root/.local/bin:$PATH" \
 # Download all three model weights at build time so cold starts are fast.
 # Each pipeline() / from_pretrained() call fetches weights + tokeniser files
 # and stores them under HF_HOME. The resulting layer is ~750 MB.
-RUN python -c "
-from transformers import pipeline, CLIPModel, CLIPProcessor
-print('→ haywoodsloan/ai-image-detector-deploy (EfficientNet)', flush=True)
-pipeline('image-classification', model='haywoodsloan/ai-image-detector-deploy')
-print('→ umm-maybe/AI-image-detector (ResNet50)', flush=True)
-pipeline('image-classification', model='umm-maybe/AI-image-detector')
-print('→ openai/clip-vit-base-patch32 (CLIP fallback)', flush=True)
-CLIPModel.from_pretrained('openai/clip-vit-base-patch32')
-CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')
-print('All model weights cached.', flush=True)
-"
+COPY backend/download_models.py /tmp/download_models.py
+RUN python3 /tmp/download_models.py
 
 
 # ── Stage 3: final runtime image ─────────────────────────────────────────────
