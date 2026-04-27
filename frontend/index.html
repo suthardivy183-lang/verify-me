@@ -56,9 +56,13 @@
 
   <link rel="stylesheet" href="styles.css" />
 
-  <!-- API endpoint — change this after Cloud Run deploy -->
+  <!-- ─── API endpoint ────────────────────────────────────────────────────
+       After Cloud Run deploy, replace the localhost URL below with the
+       Cloud Run URL printed by:  gcloud run deploy asli-api ...
+       It looks like: https://asli-api-xxxxxxxxxx-as.a.run.app
+  ─────────────────────────────────────────────────────────────────────── -->
   <script>
-    window.ASLI_API_URL = window.ASLI_API_URL || 'http://localhost:8000';
+    window.ASLI_API_URL = 'http://localhost:8000'; // ← REPLACE after deploy
   </script>
 </head>
 <body class="bg-asli-bg text-asli-text antialiased min-h-screen flex flex-col font-sans">

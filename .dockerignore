@@ -1,0 +1,48 @@
+# ── Version control ──────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Python artefacts ─────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# ── Virtual environments (never bake these in) ────────────────────────────────
+myenv/
+.venv/
+venv/
+env/
+
+# ── Secrets (NEVER commit or bake these) ─────────────────────────────────────
+.env
+*.env.*
+firebasekey.json
+
+# ── Large model files (re-downloaded at build time via HuggingFace) ───────────
+*.h5
+*.pt
+*.pth
+*.onnx
+*.bin
+models/
+
+# ── Dev / test artefacts ─────────────────────────────────────────────────────
+tests/
+testset/
+benchmark/
+docs/
+samples/
+
+# ── Frontend (deployed separately to Firebase Hosting) ───────────────────────
+frontend/
+
+# ── IDE / OS noise ───────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ── HuggingFace local cache (not the build-time cache) ───────────────────────
+.cache/
