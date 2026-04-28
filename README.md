@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="LIVE_URL">🌐 Live Demo</a> •
-  <a href="VIDEO_URL">🎥 Demo Video</a> •
-  <a href="API_URL/docs">📖 API Docs</a>
+  <a href="https://asli-solution-challenge.web.app">🌐 Live Demo</a> •
+  <a href="https://asli-api-229619506340.asia-south1.run.app/docs">📖 API Docs</a> •
+  <a href="https://asli-api-229619506340.asia-south1.run.app/healthz">❤️ API Health</a>
 </p>
 
 ---
@@ -105,12 +105,12 @@ cd frontend && python -m http.server 5500
 ## API Reference
 
 ```bash
-curl -X POST https://asli-api.run.app/scan \
+curl -X POST https://asli-api-229619506340.asia-south1.run.app/scan \
   -F "image=@photo.jpg" \
   -F "target_language=hi"
 ```
 
-See full interactive docs at `API_URL/docs`.
+See full interactive docs at [/docs](https://asli-api-229619506340.asia-south1.run.app/docs).
 
 **Response shape:**
 ```json

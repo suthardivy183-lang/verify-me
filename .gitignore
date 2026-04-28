@@ -34,3 +34,12 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Internal AI assistant context (not for public repo)
+CLAUDE.md
+
+# Test caches
+.pytest_cache/
+
+# Firebase local
+.firebase/

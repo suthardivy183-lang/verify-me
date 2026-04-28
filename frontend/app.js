@@ -69,7 +69,7 @@ const i18n = {
       Nakli: 'नक़ली होने का विश्वास',
       'Shak hai': 'अनिश्चित',
     },
-    share_text: 'मैंने Asli से एक तस्वीर जाँची — verdict: {verdict}. आप भी जाँचें: https://asli.web.app',
+    share_text: 'मैंने Asli से एक तस्वीर जाँची — verdict: {verdict}. आप भी जाँचें: https://asli-solution-challenge.web.app',
     font_class: 'font-deva',
   },
   gu: {
@@ -99,7 +99,7 @@ const i18n = {
       Nakli: 'નકલી હોવાનો વિશ્વાસ',
       'Shak hai': 'અનિશ્ચિત',
     },
-    share_text: 'મેં Asli થી તસવીર તપાસી — verdict: {verdict}. તમે પણ તપાસો: https://asli.web.app',
+    share_text: 'મેં Asli થી તસવીર તપાસી — verdict: {verdict}. તમે પણ તપાસો: https://asli-solution-challenge.web.app',
     font_class: 'font-guja',
   },
   en: {
@@ -129,7 +129,7 @@ const i18n = {
       Nakli: 'confidence this is fake',
       'Shak hai': 'uncertain',
     },
-    share_text: 'I checked an image with Asli — verdict: {verdict}. Check yours: https://asli.web.app',
+    share_text: 'I checked an image with Asli — verdict: {verdict}. Check yours: https://asli-solution-challenge.web.app',
     font_class: '',
   },
 };
@@ -450,6 +450,68 @@ function renderResult() {
   // Save-to-history banner: show for guests, hide for signed-in users
   const currentUser = _firebaseReady && auth ? auth.currentUser : null;
   _updateSaveBanner(currentUser);
+}
+
+// ─── Camera modal (desktop webcam via getUserMedia) ─────────────────────
+let _cameraStream = null;
+let _cameraFacing = 'user';
+
+async function openCameraModal() {
+  const modal = $('camera-modal');
+  const video = $('camera-video');
+  modal.classList.remove('hidden');
+  try {
+    _cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: _cameraFacing },
+      audio: false,
+    });
+    video.srcObject = _cameraStream;
+  } catch (err) {
+    console.error('Camera access failed:', err);
+    showToast('Camera access denied: ' + (err.name || err.message), 'error');
+    closeCameraModal();
+  }
+}
+
+function closeCameraModal() {
+  if (_cameraStream) {
+    _cameraStream.getTracks().forEach(t => t.stop());
+    _cameraStream = null;
+  }
+  $('camera-video').srcObject = null;
+  $('camera-modal').classList.add('hidden');
+}
+
+async function flipCamera() {
+  _cameraFacing = _cameraFacing === 'user' ? 'environment' : 'user';
+  if (_cameraStream) {
+    _cameraStream.getTracks().forEach(t => t.stop());
+    _cameraStream = null;
+  }
+  try {
+    _cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: _cameraFacing },
+      audio: false,
+    });
+    $('camera-video').srcObject = _cameraStream;
+  } catch (err) {
+    console.error('Camera flip failed:', err);
+  }
+}
+
+function captureFromCamera() {
+  const video = $('camera-video');
+  if (!video.videoWidth) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  canvas.toBlob(blob => {
+    if (!blob) return;
+    const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    closeCameraModal();
+    selectFile(file);
+  }, 'image/jpeg', 0.9);
 }
 
 // ─── Share intent ────────────────────────────────────────────────────────
@@ -1124,7 +1186,7 @@ const PDF_STRINGS = {
   en: {
     title_report: 'Asli — Digital Authenticity Report',
     title_cert:   'Asli — Digital Verification Certificate',
-    tagline:      'asli.web.app  |  Built for Google Solution Challenge 2026',
+    tagline:      'asli-solution-challenge.web.app  |  Built for Google Solution Challenge 2026',
     verdict: {
       Nakli:      'LIKELY AI-GENERATED (NAKLI)',
       Asli:       'VERIFIED AUTHENTIC (ASLI)',
@@ -1156,7 +1218,7 @@ const PDF_STRINGS = {
   hi: {
     title_report: 'असली — डिजिटल प्रामाणिकता रिपोर्ट',
     title_cert:   'असली — डिजिटल सत्यापन प्रमाणपत्र',
-    tagline:      'asli.web.app  |  Google Solution Challenge 2026 के लिए',
+    tagline:      'asli-solution-challenge.web.app  |  Google Solution Challenge 2026 के लिए',
     verdict: {
       Nakli:      'संभवतः AI-जनित (नक़ली)',
       Asli:       'प्रामाणिक सत्यापित (असली)',
@@ -1188,7 +1250,7 @@ const PDF_STRINGS = {
   gu: {
     title_report: 'અસલી — ડિજિટલ પ્રામાણિકતા અહેવાલ',
     title_cert:   'અસલી — ડિજિટલ ચકાસણી પ્રમાણપત્ર',
-    tagline:      'asli.web.app  |  Google Solution Challenge 2026 માટે',
+    tagline:      'asli-solution-challenge.web.app  |  Google Solution Challenge 2026 માટે',
     verdict: {
       Nakli:      'સંભવ AI-નિર્મિત (નકલી)',
       Asli:       'પ્રામાણિક ચકાસાયેલ (અસલી)',
@@ -1498,12 +1560,12 @@ async function downloadReport() {
     doc.setTextColor(150, 150, 150); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
     doc.text(PS.footer1, M, y, { maxWidth: CW }); y += 5;
     doc.text(PS.footer2, M, y, { maxWidth: CW }); y += 5;
-    doc.text(`asli.web.app  |  SDG 16 + SDG 10  |  Report ID: ${reportId}`, M, y);
+    doc.text(`asli-solution-challenge.web.app  |  SDG 16 + SDG 10  |  Report ID: ${reportId}`, M, y);
   } else {
     y = await renderCanvasBlock(doc, PS.footer1, y, M, CW, { fontSize: 20, color: '#969696' });
     y = await renderCanvasBlock(doc, PS.footer2, y, M, CW, { fontSize: 20, color: '#969696' });
     doc.setTextColor(150, 150, 150); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-    doc.text(`asli.web.app  |  SDG 16 + SDG 10  |  Report ID: ${reportId}`, M, y + 3);
+    doc.text(`asli-solution-challenge.web.app  |  SDG 16 + SDG 10  |  Report ID: ${reportId}`, M, y + 3);
   }
 
   // ═══ SAVE ═══
@@ -1554,6 +1616,20 @@ function init() {
     const f = e.target.files && e.target.files[0];
     if (f) selectFile(f);
   });
+
+  // Camera button: use native input on mobile (capture attr opens camera),
+  // open getUserMedia modal on desktop (where capture is ignored).
+  const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  $('camera-btn').addEventListener('click', () => {
+    if (_isMobile) {
+      $('camera-input').click();
+    } else {
+      openCameraModal();
+    }
+  });
+  $('camera-cancel-btn').addEventListener('click', closeCameraModal);
+  $('camera-capture-btn').addEventListener('click', captureFromCamera);
+  $('camera-flip-btn').addEventListener('click', flipCamera);
 
   // Drag-and-drop also just selects, doesn't scan
   const dz = $('dropzone');
