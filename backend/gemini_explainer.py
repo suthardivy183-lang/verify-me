@@ -53,9 +53,9 @@ def _verdict_and_confidence(fake_prob: float) -> tuple[str, int]:
     """Map ensemble fake_probability → (verdict_label, confidence_pct).
 
     Bands match the existing detector thresholds: <0.35 = Asli,
-    >0.65 = Nakli, in-between = Shak hai (uncertain).
+    >0.68 = Nakli, in-between = Shak hai (uncertain).
     """
-    if fake_prob >= 0.65:
+    if fake_prob >= 0.68:
         return "Nakli", min(99, max(65, int(round(fake_prob * 100))))
     if fake_prob <= 0.35:
         return "Asli", min(99, max(65, int(round((1.0 - fake_prob) * 100))))

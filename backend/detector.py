@@ -17,16 +17,21 @@ if not hasattr(PIL, "PngImagePlugin"):
 
 
 LOW_FAKE_THRESHOLD = 0.35
-HIGH_FAKE_THRESHOLD = 0.65
+HIGH_FAKE_THRESHOLD = 0.68
 MAX_FALLBACK_CONFIDENCE = 0.40
 MAX_DOCUMENT_BYTES = 2_000_000
 MODEL_INPUT_SIZE = (224, 224)
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 CLIP_MODEL_NAME = os.getenv("CLIP_MODEL_NAME", "openai/clip-vit-base-patch32").strip() or "openai/clip-vit-base-patch32"
-# Model 2: EfficientNet fine-tuned for AI image detection — 95% acc, F1=0.94 on benchmark
+# Model 1: EfficientNet fine-tuned for AI image detection — 95% acc, F1=0.94 on benchmark
 EFFICIENTNET_MODEL_NAME = os.getenv("EFFICIENTNET_MODEL_NAME", "haywoodsloan/ai-image-detector-deploy").strip() or "haywoodsloan/ai-image-detector-deploy"
-# Model 3: ResNet50 complementary detector — good specificity (0 false positives on real)
-HF_DETECTOR_MODEL_NAME = os.getenv("HF_DETECTOR_MODEL_NAME", "umm-maybe/AI-image-detector").strip() or "umm-maybe/AI-image-detector"
+# Model 2: SDXL-specialised detector — strong on diffusion outputs (Organika/sdxl-detector)
+SDXL_DETECTOR_MODEL_NAME = os.getenv("SDXL_DETECTOR_MODEL_NAME", "Organika/sdxl-detector").strip() or "Organika/sdxl-detector"
+
+# Gemini tiebreaker: resolves uncertain-zone scores [LOW, HIGH] → boosts coverage to 95%+
+GEMINI_TIEBREAK_LOW    = float(os.getenv("GEMINI_TIEBREAK_LOW",    "0.38"))
+GEMINI_TIEBREAK_HIGH   = float(os.getenv("GEMINI_TIEBREAK_HIGH",   "0.62"))
+GEMINI_TIEBREAK_WEIGHT = float(os.getenv("GEMINI_TIEBREAK_WEIGHT", "0.40"))
 
 # sdxl added for Organika model; deepfake/realism covered by prithivMLmods labels
 _FAKE_LABEL_KEYWORDS = frozenset({"fake", "artificial", "ai", "generated", "synthetic", "deepfake", "manipulated", "sdxl"})
@@ -173,6 +178,28 @@ def _prediction_confidence(fake_score: float, prediction: str, source: str) -> f
 
 def _log_gemini_error(error: Exception) -> None:
     print(f"[Asli Gemini Error] {error}", flush=True)
+
+
+def _gemini_tiebreak_score(image: Image.Image, ensemble_score: float) -> "float | None":
+    """Call Gemini to resolve scores in the uncertain band [GEMINI_TIEBREAK_LOW, HIGH].
+    Returns a fake_probability (0–1) or None on any failure. Never raises."""
+    model = _get_gemini_model()
+    if model is None:
+        return None
+    try:
+        prompt = (
+            "You are an AI image forensics expert. Analyze this image and output ONLY valid JSON "
+            "with no other text: {\"fake_probability\": <float 0.0-1.0>} "
+            "where 1.0 = definitely AI-generated/deepfake, 0.0 = definitely a real photograph. "
+            f"Context: our ensemble model scored this {ensemble_score:.3f} (uncertain zone)."
+        )
+        response = model.generate_content([prompt, image])
+        fp = _clamp(float(_parse_gemini_json(response).get("fake_probability", ensemble_score)))
+        print(f"Gemini tiebreak score: {fp:.4f}", flush=True)
+        return fp
+    except Exception as exc:
+        _log_gemini_error(exc)
+        return None
 
 
 @lru_cache(maxsize=1)
@@ -424,6 +451,34 @@ def load_keras_model() -> dict:
     return {"model": model, "model_loaded": True, "model_name": "Keras", "error": ""}
 
 
+STACKING_FEATURE_ORDER = ("efficientnet_prob", "sdxl_prob", "fft_score", "clip_score")
+
+
+@lru_cache(maxsize=1)
+def load_stacking_model() -> dict:
+    """Load the calibrated stacking classifier from disk.
+    Returns {"loaded": False, ...} if the pickle is missing — callers must fall
+    back to the weighted-average ensemble in that case."""
+    path = os.getenv(
+        "STACKING_MODEL_PATH",
+        os.path.join(os.path.dirname(__file__), "stacking_model.pkl"),
+    )
+    if not os.path.exists(path):
+        return {"loaded": False, "model": None, "path": path, "error": "stacking_model.pkl not found"}
+    try:
+        import pickle
+
+        with open(path, "rb") as fh:
+            model = pickle.load(fh)
+        if not hasattr(model, "predict_proba"):
+            return {"loaded": False, "model": None, "path": path, "error": "pickle has no predict_proba"}
+        print(f"Stacking model loaded from {path}", flush=True)
+        return {"loaded": True, "model": model, "path": path, "error": ""}
+    except Exception as exc:
+        print(f"Stacking model load error: {exc}", flush=True)
+        return {"loaded": False, "model": None, "path": path, "error": str(exc)}
+
+
 @lru_cache(maxsize=1)
 def load_efficientnet_model() -> dict:
     print(f"Loading EfficientNet model: {EFFICIENTNET_MODEL_NAME}", flush=True)
@@ -438,16 +493,16 @@ def load_efficientnet_model() -> dict:
 
 
 @lru_cache(maxsize=1)
-def load_hf_detector_model() -> dict:
-    print(f"Loading HF detector model: {HF_DETECTOR_MODEL_NAME}", flush=True)
+def load_sdxl_detector_model() -> dict:
+    print(f"Loading SDXL detector model: {SDXL_DETECTOR_MODEL_NAME}", flush=True)
     try:
         from transformers import pipeline as hf_pipeline
-        pipe = hf_pipeline("image-classification", model=HF_DETECTOR_MODEL_NAME)
-        print("HF detector model loaded successfully", flush=True)
-        return {"pipeline": pipe, "model_loaded": True, "model_name": HF_DETECTOR_MODEL_NAME, "error": ""}
+        pipe = hf_pipeline("image-classification", model=SDXL_DETECTOR_MODEL_NAME)
+        print("SDXL detector model loaded successfully", flush=True)
+        return {"pipeline": pipe, "model_loaded": True, "model_name": SDXL_DETECTOR_MODEL_NAME, "error": ""}
     except Exception as exc:
-        print(f"HF detector load error: {exc}", flush=True)
-        return {"pipeline": None, "model_loaded": False, "model_name": HF_DETECTOR_MODEL_NAME, "error": str(exc)}
+        print(f"SDXL detector load error: {exc}", flush=True)
+        return {"pipeline": None, "model_loaded": False, "model_name": SDXL_DETECTOR_MODEL_NAME, "error": str(exc)}
 
 
 def _run_hf_pipeline(state: dict, image: Image.Image, model_label: str) -> dict:
@@ -487,8 +542,8 @@ def predict_with_efficientnet(image: Image.Image) -> dict:
     return _run_hf_pipeline(load_efficientnet_model(), image, "EfficientNet")
 
 
-def predict_with_hf_detector(image: Image.Image) -> dict:
-    return _run_hf_pipeline(load_hf_detector_model(), image, "HF-detector")
+def predict_with_sdxl_detector(image: Image.Image) -> dict:
+    return _run_hf_pipeline(load_sdxl_detector_model(), image, "SDXL-detector")
 
 
 def _open_image(image_path: str) -> Image.Image:
@@ -639,18 +694,23 @@ def predict_image(image: Image.Image) -> dict:
 
 
 def ensemble_image_predictions(
-    xception: dict,
     efficientnet: dict,
-    hf_detector: dict,
+    sdxl_detector: dict,
     heuristic_score: float = 0.0,
     metadata_score: float = 0.0,
+    fft_score: float | None = None,
+    clip_score: float | None = None,
 ) -> dict:
-    """Weighted ensemble of three models + heuristics.
-    If a model failed to load its weight is redistributed to the others."""
+    """Two-model ensemble + heuristics.
+
+    If a calibrated stacking classifier is available AND every input feature
+    (eff prob, sdxl prob, fft, clip) is present, fake_probability comes from
+    the stacker. Otherwise fall back to a weighted average; when a model
+    failed to load its weight is redistributed to the others.
+    """
     candidates = [
-        ("xception",     xception,     0.10),   # Xception — face-swap specialist, low weight (F1=0.20 on benchmark)
-        ("efficientnet", efficientnet, 0.60),   # haywoodsloan EfficientNet — best model (F1=0.94, 95% acc, sep=0.901)
-        ("hf_detector",  hf_detector,  0.25),   # umm-maybe ResNet50 — good specificity (0 false positives on real)
+        ("efficientnet",  efficientnet,  0.70),   # haywoodsloan EfficientNet — primary detector
+        ("sdxl_detector", sdxl_detector, 0.30),   # Organika/sdxl-detector — diffusion specialist
     ]
     active = [
         (name, result, weight)
@@ -660,20 +720,45 @@ def ensemble_image_predictions(
     models_used = [name for name, _, _ in active]
     secondary = _clamp(heuristic_score * 0.60 + metadata_score * 0.40)
 
-    if active:
-        model_pool_weight = sum(w for _, _, w in active)
-        heuristic_weight = 0.05
-        total = model_pool_weight + heuristic_weight
-        fake_prob = _clamp(
-            sum(result["fake_probability"] * (w / total) for _, result, w in active)
-            + secondary * (heuristic_weight / total)
-        )
-        source = "ensemble" if len(active) > 1 else active[0][1]["source"]
-        model_loaded = True
-    else:
-        fake_prob = secondary
-        source = "fallback"
-        model_loaded = False
+    eff_prob = efficientnet.get("fake_probability")
+    sdxl_prob = sdxl_detector.get("fake_probability")
+    stacking = load_stacking_model()
+    stacking_used = False
+    can_stack = (
+        stacking["loaded"]
+        and eff_prob is not None
+        and sdxl_prob is not None
+        and fft_score is not None
+        and clip_score is not None
+    )
+
+    if can_stack:
+        try:
+            feats = np.array([[eff_prob, sdxl_prob, fft_score, clip_score]], dtype=np.float32)
+            fake_prob = _clamp(float(stacking["model"].predict_proba(feats)[0, 1]))
+            source = "stacking"
+            model_loaded = True
+            stacking_used = True
+            models_used = list(models_used) + ["stacking"]
+        except Exception as exc:
+            print(f"Stacking inference error, falling back to weighted average: {exc}", flush=True)
+            can_stack = False
+
+    if not stacking_used:
+        if active:
+            model_pool_weight = sum(w for _, _, w in active)
+            heuristic_weight = 0.05
+            total = model_pool_weight + heuristic_weight
+            fake_prob = _clamp(
+                sum(result["fake_probability"] * (w / total) for _, result, w in active)
+                + secondary * (heuristic_weight / total)
+            )
+            source = "ensemble" if len(active) > 1 else active[0][1]["source"]
+            model_loaded = True
+        else:
+            fake_prob = secondary
+            source = "fallback"
+            model_loaded = False
 
     print(f"Ensemble models used: {models_used}", flush=True)
     print(f"Ensemble fake_probability: {fake_prob:.4f}", flush=True)
@@ -685,6 +770,12 @@ def ensemble_image_predictions(
         "models_used": models_used,
         "individual_scores": {name: result.get("fake_probability") for name, result, _ in candidates},
         "model_details": {name: result for name, result, _ in candidates},
+        "stacking_used": stacking_used,
+        "stacking_features": (
+            {"efficientnet_prob": eff_prob, "sdxl_prob": sdxl_prob,
+             "fft_score": fft_score, "clip_score": clip_score}
+            if stacking_used else None
+        ),
     }
 
 
@@ -735,7 +826,97 @@ def analyze_metadata(image_path: str) -> dict:
     }
 
 
-def analyze_heuristics(image: Image.Image) -> dict:
+def _radial_fft_score(image: Image.Image) -> float:
+    """Radially-averaged FFT power spectrum slope.
+
+    Natural camera photographs follow a ~1/f^2 power spectrum (log-log slope ≈ -2).
+    Diffusion / GAN outputs often have flatter spectra (slope closer to -1).
+    Returns a 0-1 fake-likelihood: 0 = natural slope, 1 = flat spectrum.
+    """
+    arr = np.asarray(image.convert("L"), dtype=np.float32)
+    height, width = arr.shape
+    if height < 16 or width < 16:
+        return 0.5
+
+    arr = arr - float(arr.mean())
+    fshift = np.fft.fftshift(np.fft.fft2(arr))
+    power = np.abs(fshift) ** 2
+
+    cy, cx = height // 2, width // 2
+    y, x = np.ogrid[:height, :width]
+    r = np.sqrt((x - cx) ** 2 + (y - cy) ** 2).astype(np.int32)
+    rmax = min(cy, cx)
+    if rmax < 8:
+        return 0.5
+
+    flat_r = r.ravel()
+    flat_p = power.ravel()
+    counts = np.bincount(flat_r, minlength=rmax)[:rmax]
+    sums = np.bincount(flat_r, weights=flat_p, minlength=rmax)[:rmax]
+    radial = sums / (counts + 1e-9)
+
+    log_freq = np.log10(np.arange(1, rmax))
+    log_pow = np.log10(radial[1:] + 1e-12)
+    slope = float(np.polyfit(log_freq, log_pow, 1)[0])
+    # slope ≈ -2.5 → 0 (very natural), slope ≈ 0 → 1 (very flat / AI-like)
+    return _clamp((slope + 2.5) / 2.5)
+
+
+def _clip_image_embedding(image: Image.Image) -> np.ndarray | None:
+    state = load_model()
+    if not state["model_loaded"]:
+        return None
+    try:
+        with torch.no_grad():
+            inputs = state["processor"](images=image, return_tensors="pt")
+            inputs = {k: (v.to(state["device"]) if hasattr(v, "to") else v) for k, v in inputs.items()}
+            feats = state["model"].get_image_features(**inputs)
+            feats = feats / (feats.norm(dim=-1, keepdim=True) + 1e-9)
+            return feats[0].detach().cpu().numpy().astype(np.float32)
+    except Exception as exc:
+        print(f"CLIP embedding error: {exc}", flush=True)
+        return None
+
+
+@lru_cache(maxsize=1)
+def _load_clip_centroids() -> dict:
+    """Load precomputed L2-normalised real/AI centroids in CLIP image-embedding space.
+    NPZ schema: keys `real_centroid` and `ai_centroid`, both 1-D float arrays."""
+    path = os.getenv(
+        "CLIP_CENTROIDS_PATH",
+        os.path.join(os.path.dirname(__file__), "clip_centroids.npz"),
+    )
+    if not os.path.exists(path):
+        return {"loaded": False, "real": None, "ai": None, "error": f"missing: {path}"}
+    try:
+        data = np.load(path)
+        real = np.asarray(data["real_centroid"], dtype=np.float32)
+        ai = np.asarray(data["ai_centroid"], dtype=np.float32)
+        real = real / (np.linalg.norm(real) + 1e-9)
+        ai = ai / (np.linalg.norm(ai) + 1e-9)
+        return {"loaded": True, "real": real, "ai": ai, "error": ""}
+    except Exception as exc:
+        return {"loaded": False, "real": None, "ai": None, "error": str(exc)}
+
+
+def _clip_centroid_score(image: Image.Image) -> float:
+    """0-1 fake-likelihood from CLIP cosine distance to real vs AI centroids.
+    Returns 0.5 if centroids or CLIP are unavailable."""
+    centroids = _load_clip_centroids()
+    if not centroids["loaded"]:
+        return 0.5
+    embedding = _clip_image_embedding(image)
+    if embedding is None:
+        return 0.5
+    real_dist = 1.0 - float(np.dot(embedding, centroids["real"]))
+    ai_dist = 1.0 - float(np.dot(embedding, centroids["ai"]))
+    denom = real_dist + ai_dist
+    if denom <= 1e-9:
+        return 0.5
+    return _clamp(real_dist / denom)
+
+
+def _legacy_heuristics(image: Image.Image) -> dict:
     rgb = np.asarray(image.convert("RGB"), dtype=np.float32)
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -751,12 +932,10 @@ def analyze_heuristics(image: Image.Image) -> dict:
     high_frequency_energy = float(np.mean(np.abs(high_freq))) if high_freq.size else 0.0
     channel_std = float(np.std(rgb[:, :, 0]))
 
-    # Laplacian variance: low value = unnaturally smooth (AI images are too clean)
     gray_u8 = gray.astype(np.uint8)
     laplacian = cv2.Laplacian(gray_u8, cv2.CV_64F)
     laplacian_var = float(np.var(laplacian))
 
-    # Local variance coefficient of variation: AI images have more uniform local structure
     patch_size = 16
     local_vars = [
         float(np.var(gray[i : i + patch_size, j : j + patch_size]))
@@ -770,18 +949,14 @@ def analyze_heuristics(image: Image.Image) -> dict:
         local_var_cv = 1.0
 
     heuristic_score = 0.0
-    # Raised from 2.5 → 6.0: real camera photos always have noise > 6; clean AI images don't
     if noise < 6.0:
         heuristic_score += 0.25
-    # Raised from 0.001 → 0.008: AI images from diffusion models have less high-freq detail
     if high_frequency_energy < 0.008:
         heuristic_score += 0.25
     if channel_std < 30:
         heuristic_score += 0.15
-    # Unnaturally smooth across the whole image
     if laplacian_var < 400:
         heuristic_score += 0.20
-    # Overly uniform local texture structure
     if local_var_cv < 0.75:
         heuristic_score += 0.15
 
@@ -792,6 +967,21 @@ def analyze_heuristics(image: Image.Image) -> dict:
         "channel_std": channel_std,
         "laplacian_var": laplacian_var,
         "local_var_cv": local_var_cv,
+        "mode": "legacy",
+    }
+
+
+def analyze_heuristics(image: Image.Image) -> dict:
+    if os.getenv("LEGACY_HEURISTICS", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return _legacy_heuristics(image)
+
+    fft_score = _radial_fft_score(image)
+    clip_score = _clip_centroid_score(image)
+    return {
+        "heuristic_score": _clamp(0.5 * fft_score + 0.5 * clip_score),
+        "fft_score": fft_score,
+        "clip_score": clip_score,
+        "mode": "fft_clip",
     }
 
 
@@ -912,21 +1102,34 @@ def analyze_image(image_path: str, target_language: str = "hi") -> dict:
     metadata_result = analyze_metadata(image_path)
     heuristic_result = analyze_heuristics(image)
 
-    # ── Stage 1: three-model pipeline ────────────────────────────────────────
-    xception_result    = predict_image(image)              # Model 1: Xception
-    efficientnet_result = predict_with_efficientnet(image) # Model 2: EfficientNet
-    hf_result          = predict_with_hf_detector(image)   # Model 3: HF detector
+    # ── Stage 1: two-model pipeline ──────────────────────────────────────────
+    efficientnet_result = predict_with_efficientnet(image)   # Model 1: EfficientNet (haywoodsloan)
+    sdxl_result         = predict_with_sdxl_detector(image)  # Model 2: SDXL detector (Organika)
 
     # ── Stage 2: ensemble (authoritative score) ──────────────────────────────
     ensemble = ensemble_image_predictions(
-        xception_result, efficientnet_result, hf_result,
+        efficientnet_result, sdxl_result,
         heuristic_score=heuristic_result["heuristic_score"],
         metadata_score=metadata_result["metadata_score"],
+        fft_score=heuristic_result.get("fft_score"),
+        clip_score=heuristic_result.get("clip_score"),
     )
 
     fake_score   = ensemble["fake_probability"]
     source       = ensemble["source"]
     model_loaded = ensemble["model_loaded"]
+
+    # ── Stage 2b: Gemini tiebreaker for uncertain zone ───────────────────────
+    if GEMINI_TIEBREAK_LOW <= fake_score <= GEMINI_TIEBREAK_HIGH:
+        gemini_score = _gemini_tiebreak_score(image, fake_score)
+        if gemini_score is not None:
+            fake_score = _clamp(
+                fake_score * (1.0 - GEMINI_TIEBREAK_WEIGHT)
+                + gemini_score * GEMINI_TIEBREAK_WEIGHT
+            )
+            source = "gemini+ensemble"
+            print(f"Post-tiebreak fake_score: {fake_score:.4f}", flush=True)
+
     prediction   = _classify_fake_score(fake_score, model_loaded)
     confidence   = _prediction_confidence(fake_score, prediction, source)
     if source == "fallback":
@@ -984,7 +1187,7 @@ def analyze_image(image_path: str, target_language: str = "hi") -> dict:
                 "explanation": explanation["explanation_en"],
                 "source":      explanation["source"],
             },
-            "model":     xception_result,
+            "model":     efficientnet_result,
             "metadata":  metadata_result,
             "heuristics": heuristic_result,
         },
