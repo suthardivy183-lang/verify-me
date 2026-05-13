@@ -1728,4 +1728,268 @@ function init() {
   if (window.lucide) lucide.createIcons();
 }
 
-document.addEventListener('DOMContentLoaded', init);
+// ═══════════════════════════════════════════════════════════════
+// MODE TABS — Photo / Video / Live
+// ═══════════════════════════════════════════════════════════════
+
+let _activeMode = 'photo';
+
+function setActiveMode(mode) {
+  _activeMode = mode;
+
+  // Tab button styles
+  document.querySelectorAll('.mode-tab').forEach(btn => {
+    const isActive = btn.dataset.mode === mode;
+    btn.classList.toggle('bg-asli-text', isActive);
+    btn.classList.toggle('text-white', isActive);
+    btn.classList.toggle('text-asli-muted', !isActive);
+  });
+
+  // Show correct tab content inside upload screen
+  ['photo', 'video', 'live'].forEach(m => {
+    const el = $(`upload-${m}-tab`);
+    if (el) el.classList.toggle('hidden', m !== mode);
+  });
+
+  // Hide the mode tabs + upload screen when in live screen
+  if (mode === 'live') {
+    showScreen('live');
+  } else {
+    showScreen('upload');
+  }
+}
+
+// Patch showScreen to handle 'live'
+const _origShowScreen = showScreen;
+showScreen = function(name) {
+  ['upload', 'scanning', 'result', 'error', 'live'].forEach(s => {
+    const el = $(`screen-${s}`);
+    if (el) el.classList.toggle('hidden', s !== name);
+  });
+  state.screen = name;
+  if (window.lucide) lucide.createIcons();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+// ═══════════════════════════════════════════════════════════════
+// VIDEO UPLOAD
+// ═══════════════════════════════════════════════════════════════
+
+let _selectedVideoFile = null;
+
+function selectVideoFile(file) {
+  if (!file) return;
+  _selectedVideoFile = file;
+  const url = URL.createObjectURL(file);
+  const vid = $('video-preview');
+  vid.src = url;
+  vid.currentTime = 0.5;
+  setText('video-filename', (file.name || 'video').slice(0, 40));
+  $('video-pick').classList.add('hidden');
+  $('video-ready').classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+async function uploadAndScanVideo(file) {
+  if (!file) return;
+
+  // Show scanning screen with video-specific status
+  showScreen('scanning');
+  const statuses = [
+    'Sampling frames…',
+    'Analyzing frame 1 of 8…',
+    'Analyzing frame 3 of 8…',
+    'Analyzing frame 5 of 8…',
+    'Analyzing frame 7 of 8…',
+    'Computing verdict…',
+  ];
+  let _si = 0;
+  setText('scan-status', statuses[0]);
+  const _statusInterval = setInterval(() => {
+    _si = Math.min(_si + 1, statuses.length - 1);
+    setText('scan-status', statuses[_si]);
+  }, 5000);
+
+  // Show a blurred video thumbnail in the scanning screen
+  const vid = $('video-preview');
+  if (vid.src) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 240;
+    try { canvas.getContext('2d').drawImage(vid, 0, 0, 320, 240); } catch (_) {}
+    $('scanning-image').src = canvas.toDataURL('image/jpeg', 0.7);
+  }
+
+  const formData = new FormData();
+  formData.append('video', file);
+  formData.append('target_language', language);
+
+  try {
+    const response = await fetch(`${API_BASE}/scan-video`, {
+      method: 'POST',
+      body: formData,
+    });
+    clearInterval(_statusInterval);
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error(`HTTP ${response.status} — ${errBody.slice(0, 160)}`);
+    }
+    const data = await response.json();
+    state.result = data;
+    renderResult();
+  } catch (err) {
+    clearInterval(_statusInterval);
+    state.errorMessage = err.message || 'Video analysis failed. Please try again.';
+    setText('error-message', state.errorMessage);
+    showScreen('error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LIVE DETECTION (WebSocket)
+// ═══════════════════════════════════════════════════════════════
+
+let _liveWs        = null;
+let _liveStream    = null;
+let _liveInterval  = null;
+let _liveHistory   = [];   // rolling last-3 verdicts for smoothing
+
+const LIVE_VERDICT_COLORS = {
+  'Asli':     { border: '#16A34A', bg: '#16A34A' },
+  'Nakli':    { border: '#DC2626', bg: '#DC2626' },
+  'Shak hai': { border: '#D97706', bg: '#D97706' },
+};
+
+function updateLiveOverlay(verdict, confidence_pct) {
+  _liveHistory.push(verdict);
+  if (_liveHistory.length > 3) _liveHistory.shift();
+
+  // Majority vote over last 3 frames
+  const counts = {};
+  _liveHistory.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+  const smoothed = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+
+  const colors = LIVE_VERDICT_COLORS[smoothed] || { border: '#78716C', bg: '#78716C' };
+  $('live-border').style.borderColor = colors.border;
+  $('live-verdict-badge').classList.remove('hidden');
+  $('live-verdict-badge').style.background = colors.bg;
+  setText('live-verdict-text', smoothed);
+  setText('live-confidence-text', `${confidence_pct}%`);
+}
+
+async function startLiveDetection() {
+  const WS_BASE = API_BASE.replace(/^http/, 'ws');
+
+  try {
+    _liveStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+  } catch (err) {
+    alert('Camera access denied: ' + (err.message || err.name));
+    return;
+  }
+
+  showScreen('live');
+  $('live-video').srcObject = _liveStream;
+  $('live-border').style.borderColor = 'transparent';
+  $('live-verdict-badge').classList.add('hidden');
+  _liveHistory = [];
+
+  try {
+    _liveWs = new WebSocket(`${WS_BASE}/ws/live`);
+  } catch (err) {
+    stopLiveDetection();
+    alert('Could not connect to backend: ' + err.message);
+    return;
+  }
+
+  _liveWs.onmessage = (e) => {
+    try {
+      const { verdict, confidence_pct } = JSON.parse(e.data);
+      if (verdict) updateLiveOverlay(verdict, confidence_pct);
+    } catch (_) {}
+  };
+
+  _liveWs.onerror = () => {
+    stopLiveDetection();
+  };
+
+  // Send a frame every 2 seconds
+  _liveInterval = setInterval(() => {
+    if (!_liveWs || _liveWs.readyState !== WebSocket.OPEN) return;
+    const video = $('live-video');
+    if (!video.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 640; canvas.height = 480;
+    canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
+    canvas.toBlob(blob => {
+      if (blob && _liveWs && _liveWs.readyState === WebSocket.OPEN) {
+        _liveWs.send(blob);
+      }
+    }, 'image/jpeg', 0.85);
+  }, 2000);
+}
+
+function stopLiveDetection() {
+  clearInterval(_liveInterval);
+  _liveInterval = null;
+
+  if (_liveWs) { try { _liveWs.close(); } catch (_) {} _liveWs = null; }
+  if (_liveStream) { _liveStream.getTracks().forEach(t => t.stop()); _liveStream = null; }
+
+  _liveHistory = [];
+  $('live-video').srcObject = null;
+  setActiveMode('live');  // go back to live tab start screen
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WIRE UP NEW EVENT LISTENERS (called from init)
+// ═══════════════════════════════════════════════════════════════
+
+function initModeExtensions() {
+  // Tab switcher
+  document.querySelectorAll('.mode-tab').forEach(btn => {
+    btn.addEventListener('click', () => setActiveMode(btn.dataset.mode));
+  });
+
+  // Set initial active tab style
+  setActiveMode('photo');
+
+  // Video file input
+  $('video-file-input').addEventListener('change', e => {
+    if (e.target.files[0]) selectVideoFile(e.target.files[0]);
+  });
+
+  // Video dropzone drag-and-drop
+  const vdz = $('video-dropzone');
+  vdz.addEventListener('dragover', e => { e.preventDefault(); vdz.classList.add('border-asli-green', 'bg-stone-50'); });
+  vdz.addEventListener('dragleave', () => vdz.classList.remove('border-asli-green', 'bg-stone-50'));
+  vdz.addEventListener('drop', e => {
+    e.preventDefault();
+    vdz.classList.remove('border-asli-green', 'bg-stone-50');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('video/')) selectVideoFile(file);
+  });
+
+  // Change video button
+  $('change-video-btn').addEventListener('click', () => {
+    _selectedVideoFile = null;
+    $('video-ready').classList.add('hidden');
+    $('video-pick').classList.remove('hidden');
+    $('video-file-input').value = '';
+  });
+
+  // Analyze video button
+  $('evaluate-video-btn').addEventListener('click', () => {
+    if (_selectedVideoFile) uploadAndScanVideo(_selectedVideoFile);
+  });
+
+  // Start live detection
+  $('start-live-btn').addEventListener('click', startLiveDetection);
+
+  // Stop live detection
+  $('stop-live-btn').addEventListener('click', stopLiveDetection);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  init();
+  initModeExtensions();
+});

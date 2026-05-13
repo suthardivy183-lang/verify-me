@@ -10,7 +10,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+import io
+
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from dotenv import load_dotenv
@@ -403,6 +405,110 @@ async def report(verification_id: str):
 @app.get("/api/ping", tags=["legacy"])
 async def ping():
     return {"status": "ok"}
+
+
+# ───────────────────────── /scan-video ─────────────────────────
+
+_ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
+
+@app.post("/scan-video", tags=["detection"])
+async def scan_video(
+    video: UploadFile = File(..., description="Video file (MP4/MOV/WebM/AVI)"),
+    target_language: str = Form("hi", description="Output language: 'hi' | 'gu' | 'en'"),
+):
+    raw_bytes = await video.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Empty video upload")
+
+    ext = os.path.splitext(video.filename or "")[1].lower() or ".mp4"
+    if ext not in _ALLOWED_VIDEO_EXTS:
+        raise HTTPException(status_code=400, detail=f"Unsupported video format: {ext}")
+
+    normalized_language = (target_language or "hi").strip().lower()
+    if normalized_language not in {"hi", "gu", "en"}:
+        normalized_language = "hi"
+
+    tmp_path = os.path.join(tempfile.gettempdir(), f"scanvid_{uuid.uuid4().hex}{ext}")
+    try:
+        with open(tmp_path, "wb") as fh:
+            fh.write(raw_bytes)
+
+        from detector import analyze_video_ensemble
+
+        try:
+            result = analyze_video_ensemble(tmp_path, target_language=normalized_language)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        return JSONResponse(content=result)
+    finally:
+        try:
+            await video.close()
+        except Exception:
+            pass
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+# ───────────────────────── /ws/live (WebSocket live detection) ──
+
+@app.websocket("/ws/live")
+async def live_detect(websocket: WebSocket):
+    await websocket.accept()
+    from detector import (
+        predict_with_efficientnet,
+        predict_with_sdxl_detector,
+        ensemble_image_predictions,
+        analyze_heuristics,
+        HIGH_FAKE_THRESHOLD,
+        LOW_FAKE_THRESHOLD,
+    )
+    from PIL import Image as _PIL_Image
+
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            try:
+                image = _PIL_Image.open(io.BytesIO(data)).convert("RGB")
+            except Exception:
+                await websocket.send_json({"error": "invalid image"})
+                continue
+
+            eff_result  = predict_with_efficientnet(image)
+            sdxl_result = predict_with_sdxl_detector(image)
+            heuristic   = analyze_heuristics(image)
+
+            ensemble = ensemble_image_predictions(
+                eff_result, sdxl_result,
+                heuristic_score=heuristic["heuristic_score"],
+                fft_score=heuristic.get("fft_score"),
+                clip_score=heuristic.get("clip_score"),
+            )
+            fake_score = ensemble["fake_probability"]
+
+            if fake_score >= HIGH_FAKE_THRESHOLD:
+                verdict = "Nakli"
+            elif fake_score <= LOW_FAKE_THRESHOLD:
+                verdict = "Asli"
+            else:
+                verdict = "Shak hai"
+
+            confidence_pct = int(min(abs(fake_score - 0.5) * 200, 99))
+
+            await websocket.send_json({
+                "verdict":        verdict,
+                "fake_score":     round(fake_score, 3),
+                "confidence_pct": confidence_pct,
+            })
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        try:
+            await websocket.send_json({"error": str(exc)})
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

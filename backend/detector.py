@@ -1481,3 +1481,93 @@ def analyze_video(video_path: str) -> dict:
 
 
 analyze_photo = analyze_image
+
+
+def analyze_video_ensemble(video_path: str, target_language: str = "hi", max_frames: int = 8) -> dict:
+    """Frame-by-frame deepfake analysis using the full EfficientNet + Organika ensemble.
+
+    Returns a dict compatible with the /scan-video endpoint schema.
+    """
+    import io as _io
+    from gemini_explainer import generate_explanation
+
+    # Temporarily override VIDEO_MAX_FRAMES to control frame count
+    import os as _os
+    _orig = _os.environ.get("VIDEO_MAX_FRAMES")
+    _os.environ["VIDEO_MAX_FRAMES"] = str(max_frames)
+    try:
+        sampled = _sample_video_frames(video_path)
+    finally:
+        if _orig is None:
+            _os.environ.pop("VIDEO_MAX_FRAMES", None)
+        else:
+            _os.environ["VIDEO_MAX_FRAMES"] = _orig
+
+    frames = sampled["frames"][:max_frames]
+    frame_scores: list[float] = []
+    frame_details: list[dict] = []
+
+    for i, frame in enumerate(frames):
+        pil = frame["image"]
+        eff_result  = predict_with_efficientnet(pil)
+        sdxl_result = predict_with_sdxl_detector(pil)
+        heuristic   = analyze_heuristics(pil)
+
+        ensemble = ensemble_image_predictions(
+            eff_result, sdxl_result,
+            heuristic_score=heuristic["heuristic_score"],
+            fft_score=heuristic.get("fft_score"),
+            clip_score=heuristic.get("clip_score"),
+        )
+        score = ensemble["fake_probability"]
+        frame_scores.append(score)
+        frame_details.append({
+            "frame_index": frame["frame_index"],
+            "fake_probability": round(score, 4),
+            "models_used": ensemble["models_used"],
+            "source": ensemble["source"],
+        })
+        print(f"  Frame {i+1}/{len(frames)} (idx={frame['frame_index']}): fake_score={score:.4f}", flush=True)
+
+    aggregate_score = float(np.mean(frame_scores)) if frame_scores else 0.5
+    worst_idx       = int(np.argmax(frame_scores)) if frame_scores else 0
+    worst_frame_pil = frames[worst_idx]["image"]
+
+    # Convert worst frame to bytes for the explainer
+    buf = _io.BytesIO()
+    worst_frame_pil.save(buf, format="JPEG", quality=85)
+    worst_frame_bytes = buf.getvalue()
+
+    explainer_features = {
+        "models_used": frame_details[worst_idx]["models_used"] if frame_details else [],
+        "individual_scores": {},
+        "heuristics": {},
+        "metadata_status": "not_applicable",
+        "ensemble_fake_probability": aggregate_score,
+        "is_video": True,
+        "frame_count": len(frames),
+    }
+    explanation = generate_explanation(
+        image_bytes=worst_frame_bytes,
+        fake_prob=aggregate_score,
+        features=explainer_features,
+        target_language=target_language,
+    )
+
+    return {
+        "verdict":          explanation["verdict"],
+        "confidence_pct":   explanation["confidence_pct"],
+        "explanation_en":   explanation["explanation_en"],
+        "explanation_local": explanation.get("explanation_local", explanation["explanation_en"]),
+        "red_flags":        explanation.get("red_flags", []),
+        "learn_more_tip":   explanation.get("learn_more_tip", ""),
+        "source":           "ensemble",
+        "frame_count":      len(frames),
+        "frame_scores":     [round(s, 4) for s in frame_scores],
+        "worst_frame_index": worst_idx,
+        "video_metadata": {
+            "total_frames": sampled["total_frames"],
+            "fps":          sampled["fps"],
+            "sampled_frames": len(frames),
+        },
+    }

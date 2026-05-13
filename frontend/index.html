@@ -62,7 +62,9 @@
        It looks like: https://asli-api-xxxxxxxxxx-as.a.run.app
   ─────────────────────────────────────────────────────────────────────── -->
   <script>
-    window.ASLI_API_URL = 'https://asli-api-229619506340.asia-south1.run.app';
+    window.ASLI_API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'http://localhost:8000'
+      : 'https://asli-api-229619506340.asia-south1.run.app';
   </script>
 </head>
 <body class="bg-asli-bg text-asli-text antialiased min-h-screen flex flex-col font-sans">
@@ -149,12 +151,28 @@
   <!-- ─── Main ─── -->
   <main class="flex-1 max-w-md mx-auto w-full px-4 py-6">
 
+    <!-- Mode tab switcher: Photo / Video / Live -->
+    <div id="mode-tabs" class="flex rounded-xl overflow-hidden border border-stone-200 mb-6 bg-white shadow-sm">
+      <button data-mode="photo" class="mode-tab flex-1 py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 transition">
+        <i data-lucide="image" class="w-4 h-4"></i> Photo
+      </button>
+      <button data-mode="video" class="mode-tab flex-1 py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 transition border-x border-stone-200">
+        <i data-lucide="video" class="w-4 h-4"></i> Video
+      </button>
+      <button data-mode="live" class="mode-tab flex-1 py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 transition">
+        <i data-lucide="radio" class="w-4 h-4"></i> Live
+      </button>
+    </div>
+
     <!-- SCREEN A — UPLOAD (two sub-states: pick → ready) -->
     <section id="screen-upload" class="screen">
       <div class="text-center mb-8 mt-4">
         <h1 id="hero" class="text-4xl font-extrabold tracking-tight leading-tight mb-3"></h1>
         <p id="subhero" class="text-asli-muted text-base"></p>
       </div>
+
+      <!-- ── Photo tab content ── -->
+      <div id="upload-photo-tab">
 
       <!-- Sub-state 1: PICK (no file yet) -->
       <div id="upload-pick">
@@ -218,6 +236,97 @@
           <span id="evaluate-text"></span>
         </button>
       </div>
+
+      </div><!-- /upload-photo-tab -->
+
+      <!-- ── Video tab content ── -->
+      <div id="upload-video-tab" class="hidden">
+        <!-- Pick state -->
+        <div id="video-pick">
+          <label
+            id="video-dropzone"
+            for="video-file-input"
+            class="block cursor-pointer rounded-2xl border-2 border-dashed border-stone-300 bg-white px-6 py-12 text-center transition-all hover:border-asli-green hover:bg-stone-50">
+            <div class="flex flex-col items-center gap-3">
+              <div class="w-16 h-16 rounded-full bg-asli-green-light flex items-center justify-center">
+                <i data-lucide="video" class="w-8 h-8 text-asli-green"></i>
+              </div>
+              <p class="font-semibold text-asli-text">Upload a video to verify</p>
+              <p class="text-sm text-asli-muted">MP4 · MOV · WebM · AVI</p>
+            </div>
+          </label>
+          <input id="video-file-input" type="file" accept="video/mp4,video/quicktime,video/webm,video/avi,.mp4,.mov,.webm,.avi" class="sr-only" />
+        </div>
+
+        <!-- Ready state -->
+        <div id="video-ready" class="hidden">
+          <div class="rounded-2xl bg-white border border-stone-200 p-3 mb-4 shadow-sm">
+            <div class="rounded-xl overflow-hidden bg-stone-100 aspect-[4/3] flex items-center justify-center">
+              <video id="video-preview" class="w-full h-full object-contain" muted preload="metadata"></video>
+            </div>
+            <div class="flex items-center justify-between mt-3 px-1">
+              <p class="text-xs text-asli-muted truncate flex-1 mr-3">
+                <i data-lucide="video" class="w-3.5 h-3.5 inline-block -mt-0.5"></i>
+                <span id="video-filename"></span>
+              </p>
+              <button id="change-video-btn" class="text-xs font-semibold text-asli-text hover:underline shrink-0 inline-flex items-center gap-1">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i> Change
+              </button>
+            </div>
+          </div>
+          <button
+            id="evaluate-video-btn"
+            class="w-full rounded-xl bg-asli-green text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-green-700 transition shadow-md">
+            <i data-lucide="shield-check" class="w-5 h-5"></i>
+            <span>Analyze this video</span>
+          </button>
+        </div>
+      </div><!-- /upload-video-tab -->
+
+      <!-- ── Live tab content ── -->
+      <div id="upload-live-tab" class="hidden">
+        <div class="rounded-2xl bg-white border border-stone-200 p-6 text-center shadow-sm mb-4">
+          <div class="w-16 h-16 rounded-full bg-nakli-red-light flex items-center justify-center mx-auto mb-4">
+            <i data-lucide="radio" class="w-8 h-8 text-nakli-red"></i>
+          </div>
+          <h2 class="font-bold text-lg text-asli-text mb-1">Live Interview Detection</h2>
+          <p class="text-sm text-asli-muted mb-5">Point your camera at the person being interviewed. The system will analyze each frame for deepfake signals in real time.</p>
+          <button
+            id="start-live-btn"
+            class="w-full rounded-xl bg-asli-text text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-stone-800 transition shadow-md">
+            <i data-lucide="video" class="w-5 h-5"></i>
+            Start Live Detection
+          </button>
+        </div>
+        <p class="text-xs text-asli-muted text-center">Analysis runs every 2 seconds · No video is stored</p>
+      </div><!-- /upload-live-tab -->
+
+    </section>
+
+    <!-- SCREEN D — LIVE DETECTION -->
+    <section id="screen-live" class="screen hidden">
+      <div class="relative rounded-2xl overflow-hidden bg-black shadow-xl mb-4" style="aspect-ratio:4/3">
+        <video id="live-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+        <!-- Colored border overlay -->
+        <div id="live-border" class="absolute inset-0 rounded-2xl border-4 border-transparent transition-colors duration-500 pointer-events-none"></div>
+        <!-- Verdict badge overlay -->
+        <div id="live-verdict-badge" class="hidden absolute bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 rounded-full font-bold text-white text-sm shadow-lg flex items-center gap-2">
+          <span id="live-verdict-dot" class="w-2.5 h-2.5 rounded-full bg-white animate-pulse"></span>
+          <span id="live-verdict-text">Analyzing...</span>
+          <span id="live-confidence-text" class="opacity-75"></span>
+        </div>
+        <!-- Scanning indicator (top-left) -->
+        <div class="absolute top-3 left-3 flex items-center gap-1.5 bg-black/50 rounded-full px-3 py-1">
+          <span class="w-2 h-2 rounded-full bg-nakli-red animate-pulse"></span>
+          <span class="text-white text-xs font-medium">LIVE</span>
+        </div>
+      </div>
+      <button
+        id="stop-live-btn"
+        class="w-full rounded-xl bg-white border-2 border-stone-200 text-asli-text font-semibold py-3 flex items-center justify-center gap-2 hover:bg-stone-50 transition">
+        <i data-lucide="square" class="w-4 h-4"></i>
+        Stop Detection
+      </button>
     </section>
 
     <!-- SCREEN B — SCANNING -->
