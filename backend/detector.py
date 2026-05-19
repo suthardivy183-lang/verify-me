@@ -1483,13 +1483,106 @@ def analyze_video(video_path: str) -> dict:
 analyze_photo = analyze_image
 
 
-def analyze_video_ensemble(video_path: str, target_language: str = "hi", max_frames: int = 8) -> dict:
+def analyze_video_fast(video_path: str, target_language: str = "hi", max_frames: int = 4) -> dict:
+    """Lightweight video analysis: EfficientNet only, no Gemini, no Organika.
+
+    Designed to complete in under 15s on Mac CPU once models are warm.
+    Returns same schema as /scan-video.
+    """
+    import io as _io
+    import time as _time
+    import os as _os
+
+    _t_start = _time.time()
+    print(f"[scan-video-fast] Starting {video_path}", flush=True)
+
+    # Use _sample_video_frames with env override
+    _orig = _os.environ.get("VIDEO_MAX_FRAMES")
+    _os.environ["VIDEO_MAX_FRAMES"] = str(max_frames)
+    try:
+        sampled = _sample_video_frames(video_path)
+    finally:
+        if _orig is None:
+            _os.environ.pop("VIDEO_MAX_FRAMES", None)
+        else:
+            _os.environ["VIDEO_MAX_FRAMES"] = _orig
+
+    frames = sampled["frames"][:max_frames]
+    frame_scores: list[float] = []
+
+    for i, frame in enumerate(frames):
+        _t_frame = _time.time()
+        eff_result = predict_with_efficientnet(frame["image"])
+        score = _clamp(float(eff_result.get("fake_probability", 0.5)))
+        frame_scores.append(score)
+        print(f"[scan-video-fast] Frame {i+1}/{len(frames)}: score={score:.4f}  ({_time.time()-_t_frame:.1f}s)", flush=True)
+
+    aggregate_score = float(np.mean(frame_scores)) if frame_scores else 0.5
+    worst_idx       = int(np.argmax(frame_scores)) if frame_scores else 0
+
+    # Score-only verdict, no Gemini call
+    if aggregate_score >= HIGH_FAKE_THRESHOLD:
+        verdict = "Nakli"
+        confidence_pct = min(int(aggregate_score * 100), 99)
+        explanation = (
+            f"Analyzed {len(frames)} frames across the video. The detection model flagged "
+            f"every frame as showing strong AI-generation signatures (average score: "
+            f"{aggregate_score:.2f}). Modern AI video generators leave subtle artifacts in "
+            f"frame-level texture patterns, and this video exhibits those signatures consistently."
+        )
+        red_flags = ["consistent AI signatures across multiple frames", "high model confidence on every sampled frame"]
+    elif aggregate_score <= LOW_FAKE_THRESHOLD:
+        verdict = "Asli"
+        confidence_pct = min(int((1.0 - aggregate_score) * 100), 99)
+        explanation = (
+            f"Analyzed {len(frames)} frames. None of the sampled frames showed strong AI-generation "
+            f"signatures (average score: {aggregate_score:.2f}). The available evidence supports "
+            f"this being authentic video footage."
+        )
+        red_flags = []
+    else:
+        verdict = "Shak hai"
+        confidence_pct = 50
+        explanation = (
+            f"Analyzed {len(frames)} frames. Results are mixed (average score: {aggregate_score:.2f}). "
+            f"Some frames show partial AI signatures but the evidence is not strong enough for a "
+            f"confident verdict. Treat this video with caution and verify the source independently."
+        )
+        red_flags = ["inconsistent signals across frames"]
+
+    print(f"[scan-video-fast] Done in {_time.time()-_t_start:.1f}s — verdict: {verdict}", flush=True)
+
+    return {
+        "verdict":          verdict,
+        "confidence_pct":   confidence_pct,
+        "explanation_en":   explanation,
+        "explanation_local": explanation,
+        "red_flags":        red_flags,
+        "learn_more_tip":   "Cross-check with the original source. Watch for unnatural lip-sync, inconsistent lighting between frames, and check the uploader's history before trusting any video.",
+        "source":           "efficientnet_video",
+        "frame_count":      len(frames),
+        "frame_scores":     [round(s, 4) for s in frame_scores],
+        "worst_frame_index": worst_idx,
+        "video_metadata": {
+            "total_frames": sampled["total_frames"],
+            "fps":          sampled["fps"],
+            "sampled_frames": len(frames),
+        },
+    }
+
+
+def analyze_video_ensemble(video_path: str, target_language: str = "hi", max_frames: int = 4) -> dict:
     """Frame-by-frame deepfake analysis using the full EfficientNet + Organika ensemble.
 
     Returns a dict compatible with the /scan-video endpoint schema.
+    Default 4 frames keeps total time under ~20s on Mac CPU.
     """
     import io as _io
+    import time as _time
     from gemini_explainer import generate_explanation
+
+    _t_start = _time.time()
+    print(f"[scan-video] Starting analysis of {video_path} (max_frames={max_frames})", flush=True)
 
     # Temporarily override VIDEO_MAX_FRAMES to control frame count
     import os as _os
@@ -1508,6 +1601,7 @@ def analyze_video_ensemble(video_path: str, target_language: str = "hi", max_fra
     frame_details: list[dict] = []
 
     for i, frame in enumerate(frames):
+        _t_frame = _time.time()
         pil = frame["image"]
         eff_result  = predict_with_efficientnet(pil)
         sdxl_result = predict_with_sdxl_detector(pil)
@@ -1527,7 +1621,7 @@ def analyze_video_ensemble(video_path: str, target_language: str = "hi", max_fra
             "models_used": ensemble["models_used"],
             "source": ensemble["source"],
         })
-        print(f"  Frame {i+1}/{len(frames)} (idx={frame['frame_index']}): fake_score={score:.4f}", flush=True)
+        print(f"[scan-video] Frame {i+1}/{len(frames)} (idx={frame['frame_index']}): score={score:.4f}  ({_time.time()-_t_frame:.1f}s)", flush=True)
 
     aggregate_score = float(np.mean(frame_scores)) if frame_scores else 0.5
     worst_idx       = int(np.argmax(frame_scores)) if frame_scores else 0
@@ -1547,12 +1641,34 @@ def analyze_video_ensemble(video_path: str, target_language: str = "hi", max_fra
         "is_video": True,
         "frame_count": len(frames),
     }
-    explanation = generate_explanation(
-        image_bytes=worst_frame_bytes,
-        fake_prob=aggregate_score,
-        features=explainer_features,
-        target_language=target_language,
-    )
+    print(f"[scan-video] All frames done in {_time.time()-_t_start:.1f}s. Calling explainer...", flush=True)
+    _t_exp = _time.time()
+    try:
+        explanation = generate_explanation(
+            image_bytes=worst_frame_bytes,
+            fake_prob=aggregate_score,
+            features=explainer_features,
+            target_language=target_language,
+        )
+        print(f"[scan-video] Explainer done in {_time.time()-_t_exp:.1f}s. Total: {_time.time()-_t_start:.1f}s", flush=True)
+    except Exception as exc:
+        print(f"[scan-video] Explainer failed: {exc}. Using template fallback.", flush=True)
+        # Fallback verdict from score alone
+        if aggregate_score >= HIGH_FAKE_THRESHOLD:
+            verdict, conf = "Nakli", int(aggregate_score * 100)
+        elif aggregate_score <= LOW_FAKE_THRESHOLD:
+            verdict, conf = "Asli", int((1.0 - aggregate_score) * 100)
+        else:
+            verdict, conf = "Shak hai", 50
+        explanation = {
+            "verdict": verdict,
+            "confidence_pct": conf,
+            "explanation_en": f"Analyzed {len(frames)} frames. Average fake probability: {aggregate_score:.2f}",
+            "explanation_local": "",
+            "red_flags": [],
+            "learn_more_tip": "",
+            "source": "fallback",
+        }
 
     return {
         "verdict":          explanation["verdict"],

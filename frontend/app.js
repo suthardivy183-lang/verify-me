@@ -162,12 +162,11 @@ const state = {
 let currentScan = null;
 
 function detectLanguage() {
+  // Returning users keep their chosen language; new accounts/guests
+  // default to English (changeable anytime in Settings).
   const stored = localStorage.getItem('asli_lang');
   if (stored && i18n[stored]) return stored;
-  const nav = (navigator.language || 'hi').toLowerCase();
-  if (nav.startsWith('gu')) return 'gu';
-  if (nav.startsWith('en')) return 'en';
-  return 'hi';
+  return 'en';
 }
 
 // ─── DOM helpers ───────────────────────────────────────────────────────────
@@ -699,7 +698,7 @@ function renderHistoryList(docs) {
         <p class="font-semibold text-asli-text mb-1">No scans yet</p>
         <p class="text-sm text-asli-muted mb-5">Upload an image to start verifying</p>
         <button id="history-scan-now-btn"
-          class="rounded-xl bg-asli-green text-white font-semibold px-6 py-2.5 text-sm hover:bg-green-700 transition">
+          class="rounded-xl bg-brand text-white font-semibold px-6 py-2.5 text-sm hover:bg-brand-deep transition shadow-glow">
           Scan now
         </button>
       </div>`;
@@ -718,12 +717,12 @@ function renderHistoryList(docs) {
     const d         = doc.data();
     const badgeStyle = BADGE[d.verdict] || BADGE['Shak hai'];
     const card      = document.createElement('div');
-    card.className  = 'bg-white rounded-xl border border-stone-200 p-3 flex gap-3 items-start';
+    card.className  = 'history-card bg-white rounded-2xl border border-slate-200 shadow-card p-3 flex gap-3 items-start transition';
 
     const thumb = document.createElement('img');
     thumb.src   = d.imageThumbnail || '';
     thumb.alt   = '';
-    thumb.className = 'rounded-lg object-cover bg-stone-100 shrink-0';
+    thumb.className = 'rounded-xl object-cover bg-slate-100 shrink-0';
     thumb.style.cssText = 'width:60px;height:60px;';
 
     const body = document.createElement('div');
@@ -800,9 +799,9 @@ function renderSettingsContent() {
       saveLanguagePref(btn.dataset.lang);
       content.querySelectorAll('.settings-lang-btn').forEach(b => {
         const active = b.dataset.lang === btn.dataset.lang;
-        b.style.background = active ? '#1c1917' : '#fff';
-        b.style.color      = active ? '#fff'    : '#78716c';
-        b.style.borderColor = active ? '#1c1917' : '#e5e7eb';
+        b.style.background = active ? '#0F172A' : '#fff';
+        b.style.color      = active ? '#fff'    : '#64748B';
+        b.style.borderColor = active ? '#0F172A' : '#E2E8F0';
       });
     });
   });
@@ -833,9 +832,9 @@ function renderSettingsContent() {
 
 function _settingsCard(title, icon, badgeHtml, body) {
   return (
-    `<div class="bg-white rounded-2xl border border-[#e5e7eb] p-4">` +
+    `<div class="settings-card bg-white rounded-2xl border border-slate-200 p-4 shadow-card">` +
       `<div class="flex items-center justify-between mb-3">` +
-        `<p class="text-xs font-medium uppercase tracking-wider" style="color:#9ca3af;letter-spacing:0.06em">${icon} ${title}</p>` +
+        `<p class="text-[11px] font-bold uppercase tracking-wider" style="color:#94A3B8;letter-spacing:0.08em">${icon} ${title}</p>` +
         badgeHtml +
       `</div>` +
       body +
@@ -854,7 +853,7 @@ function _settingsSectionLanguage() {
     return (
       `<button class="settings-lang-btn px-4 py-2 rounded-lg text-sm font-semibold border transition" ` +
       `data-lang="${code}" ` +
-      `style="background:${active ? '#1c1917' : '#fff'};color:${active ? '#fff' : '#78716c'};border-color:${active ? '#1c1917' : '#e5e7eb'}">` +
+      `style="background:${active ? '#0F172A' : '#fff'};color:${active ? '#fff' : '#64748B'};border-color:${active ? '#0F172A' : '#E2E8F0'}">` +
       label +
       `</button>`
     );
@@ -869,15 +868,15 @@ function _settingsSectionNotifications() {
   const badge = `<span class="text-xs font-semibold px-2 py-0.5 rounded-full" style="background:#FEF3C7;color:#D97706">Phase 2</span>`;
   const row = (label) =>
     `<label class="flex items-center justify-between py-2.5 select-none" title="Coming in Phase 2 — WhatsApp Bot">` +
-      `<span class="text-sm" style="color:#9ca3af">${label}</span>` +
-      `<div class="w-10 h-6 rounded-full relative shrink-0" style="background:#e5e7eb">` +
+      `<span class="text-sm" style="color:#94A3B8">${label}</span>` +
+      `<div class="w-10 h-6 rounded-full relative shrink-0" style="background:#E2E8F0">` +
         `<div class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm"></div>` +
       `</div>` +
     `</label>`;
   return _settingsCard('Notifications', '\u{1F514}', badge,
     `<div class="opacity-50 pointer-events-none">` +
       row('Scam alerts in my area') +
-      `<div style="border-top:0.5px solid #f3f4f6"></div>` +
+      `<div style="border-top:1px solid #F1F5F9"></div>` +
       row('Weekly media-literacy tips') +
     `</div>`
   );
@@ -888,23 +887,23 @@ function _settingsSectionAccount(user) {
     return _settingsCard('Account', '\u{1F464}', '',
       `<p class="text-sm text-asli-muted mb-3">Sign in to manage your account and scan history.</p>` +
       `<button id="settings-signin-btn" ` +
-        `class="w-full rounded-xl bg-asli-text text-white font-semibold py-2.5 text-sm hover:bg-stone-800 transition">` +
+        `class="w-full rounded-xl bg-ink text-white font-semibold py-2.5 text-sm hover:bg-slate-800 transition shadow-lift">` +
         `Sign in with Google` +
       `</button>`
     );
   }
   return _settingsCard('Account', '\u{1F464}', '',
     `<div class="flex items-center gap-3 mb-4">` +
-      `<img src="${escapeHtml(user.photoURL || '')}" alt="" class="w-12 h-12 rounded-full bg-stone-100 object-cover shrink-0" />` +
+      `<img src="${escapeHtml(user.photoURL || '')}" alt="" class="w-12 h-12 rounded-full bg-slate-100 object-cover shrink-0 ring-2 ring-slate-100" />` +
       `<div class="min-w-0">` +
         `<p class="font-semibold text-asli-text truncate">${escapeHtml(user.displayName || '')}</p>` +
         `<p class="text-xs text-asli-muted truncate">${escapeHtml(user.email || '')}</p>` +
         `<p class="text-xs text-asli-muted">Signed in with Google</p>` +
       `</div>` +
     `</div>` +
-    `<div style="border-top:0.5px solid #f3f4f6" class="mb-3"></div>` +
+    `<div style="border-top:1px solid #F1F5F9" class="mb-3"></div>` +
     `<button id="settings-export-btn" ` +
-      `class="w-full rounded-xl border border-stone-200 text-asli-text font-semibold py-2.5 text-sm hover:bg-stone-50 transition mb-2">` +
+      `class="w-full rounded-xl border border-slate-200 text-asli-text font-semibold py-2.5 text-sm hover:bg-slate-50 transition mb-2">` +
       `Export my data` +
     `</button>` +
     `<button id="settings-delete-btn" ` +
@@ -920,7 +919,7 @@ function _settingsSectionAbout() {
     `<p class="text-sm font-medium text-asli-text mb-0.5">Version 1.0.0</p>` +
     `<p class="text-sm text-asli-muted mb-1">Built for Google Solution Challenge 2026</p>` +
     `<p class="text-xs text-asli-muted mb-3">Theme: Digital Asset Protection &nbsp;·&nbsp; SDG 16 · SDG 10</p>` +
-    `<div style="border-top:0.5px solid #f3f4f6" class="mb-3"></div>` +
+    `<div style="border-top:1px solid #F1F5F9" class="mb-3"></div>` +
     `<a href="https://github.com/suthardivy183-lang/verify-me" target="_blank" rel="noopener" ` +
       `class="flex items-center gap-2 text-sm font-semibold text-asli-green hover:underline mb-2">` +
       `View on GitHub →` +
@@ -954,9 +953,15 @@ function _settingsSectionPrivacy() {
 
 async function saveLanguagePref(lang) {
   if (!i18n[lang]) return;
+  const prevLang = state.language;
   localStorage.setItem('asli_lang', lang);
   state.language = lang;
   applyLanguage();
+  // If a result is on screen, re-fetch it so explanation/red-flags/tip
+  // come back in the newly chosen language (cheap if backend-cached).
+  if (state.screen === 'result' && state.result && state.selectedFile && lang !== prevLang) {
+    uploadAndScan(state.selectedFile, { language: lang, statusKey: 'relang_status' });
+  }
   if (_firebaseReady && auth && auth.currentUser) {
     try {
       await db.collection('users').doc(auth.currentUser.uid)
@@ -1066,8 +1071,8 @@ function showConfirmDialog(title, bodyHtml, onConfirm) {
 // ─── Toast ───────────────────────────────────────────────────────────────────
 function showToast(message, type = 'info') {
   const palette = {
-    info:    'background:#1c1917;color:#fff',
-    success: 'background:#16A34A;color:#fff',
+    info:    'background:#0F172A;color:#fff',
+    success: 'background:#047857;color:#fff',
     error:   'background:#DC2626;color:#fff',
   };
   const toast = document.createElement('div');
@@ -1078,12 +1083,14 @@ function showToast(message, type = 'info') {
     'bottom:calc(1.5rem + env(safe-area-inset-bottom))',
     'left:50%',
     'transform:translateX(-50%)',
-    'padding:10px 22px',
+    'padding:12px 24px',
     'border-radius:9999px',
     'font-size:14px',
-    'font-weight:500',
+    'font-weight:600',
     'font-family:Inter,system-ui,sans-serif',
-    'box-shadow:0 4px 16px rgba(0,0,0,0.18)',
+    'box-shadow:0 8px 28px -6px rgba(15,23,42,0.45)',
+    '-webkit-backdrop-filter:blur(8px)',
+    'backdrop-filter:blur(8px)',
     'z-index:9999',
     'white-space:nowrap',
     'transition:opacity 280ms ease,transform 280ms ease',
@@ -1152,8 +1159,57 @@ function signIn() {
 }
 
 function signOut() {
-  if (!_firebaseReady) return;
+  try { localStorage.removeItem('asli_guest'); } catch (_) {}
+  if (!_firebaseReady) { showAuthGate(); return; }
   auth.signOut().catch(err => console.error('Sign out failed:', err));
+}
+
+// ─── Auth gate (professional landing / sign-in) ───────────────────────────────
+function hideAuthGate() {
+  const gate  = $('auth-gate');
+  const shell = $('app-shell');
+  if (gate)  gate.classList.add('hidden');
+  if (shell) shell.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function showAuthGate() {
+  // Respect a prior "continue as guest" choice so we don't nag every load
+  let guest = false;
+  try { guest = localStorage.getItem('asli_guest') === '1'; } catch (_) {}
+  if (guest) { hideAuthGate(); return; }
+  const gate  = $('auth-gate');
+  const shell = $('app-shell');
+  if (gate)  gate.classList.remove('hidden');
+  if (shell) shell.classList.add('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function continueAsGuest() {
+  try { localStorage.setItem('asli_guest', '1'); } catch (_) {}
+  hideAuthGate();
+}
+
+function bindAuthGate() {
+  const g = $('gate-google-btn');
+  if (g) g.addEventListener('click', () => {
+    if (!_firebaseReady) {
+      showToast('Google sign-in unavailable — continuing as guest', 'info');
+      continueAsGuest();
+      return;
+    }
+    signIn();
+  });
+  const skip = $('gate-skip');
+  if (skip) skip.addEventListener('click', continueAsGuest);
+
+  // If Firebase isn't available at all, the gate would trap the user —
+  // surface guest mode as the working path (button is already visible).
+  if (!_firebaseReady) {
+    let guest = false;
+    try { guest = localStorage.getItem('asli_guest') === '1'; } catch (_) {}
+    if (guest) hideAuthGate();
+  }
 }
 
 // ─── Dropdown ─────────────────────────────────────────────────────────────────
@@ -1708,10 +1764,13 @@ function init() {
         else showToast('Signed out', 'info');
       }
       _authInitialized = true;
-      if (user) { showLoggedInNav(user); loadUserSettings(user.uid); }
-      else showLoggedOutNav();
+      if (user) { hideAuthGate(); showLoggedInNav(user); loadUserSettings(user.uid); }
+      else { showAuthGate(); showLoggedOutNav(); }
     });
   }
+
+  // Auth gate buttons — always wired (works with or without Firebase)
+  bindAuthGate();
 
   // Settings panel — always accessible (guests + signed-in users)
   $('settings-gear-btn').addEventListener('click', () => openSettingsPanel());
@@ -1735,6 +1794,12 @@ function init() {
 let _activeMode = 'photo';
 
 function setActiveMode(mode) {
+  // If switching away from live mode and a session is active, stop it
+  if (_activeMode === 'live' && mode !== 'live' && (_liveWs || _liveStream || _liveInterval)) {
+    console.log('[live] Switching tabs — stopping live session');
+    _stopLiveSessionOnly();
+  }
+
   _activeMode = mode;
 
   // Tab button styles
@@ -1751,12 +1816,20 @@ function setActiveMode(mode) {
     if (el) el.classList.toggle('hidden', m !== mode);
   });
 
-  // Hide the mode tabs + upload screen when in live screen
-  if (mode === 'live') {
-    showScreen('live');
-  } else {
-    showScreen('upload');
-  }
+  // Always show the upload screen (the active tab content is inside it).
+  // Live-detection screen only opens after clicking "Start Live Detection".
+  showScreen('upload');
+}
+
+// Stop the live session without switching tabs (used internally)
+function _stopLiveSessionOnly() {
+  clearInterval(_liveInterval);
+  _liveInterval = null;
+  if (_liveWs) { try { _liveWs.close(); } catch (_) {} _liveWs = null; }
+  if (_liveStream) { _liveStream.getTracks().forEach(t => t.stop()); _liveStream = null; }
+  _liveHistory = [];
+  const v = $('live-video');
+  if (v) v.srcObject = null;
 }
 
 // Patch showScreen to handle 'live'
@@ -1819,6 +1892,8 @@ async function uploadAndScanVideo(file) {
     $('scanning-image').src = canvas.toDataURL('image/jpeg', 0.7);
   }
 
+  const language = state.language;
+
   const formData = new FormData();
   formData.append('video', file);
   formData.append('target_language', language);
@@ -1879,37 +1954,65 @@ function updateLiveOverlay(verdict, confidence_pct) {
 
 async function startLiveDetection() {
   const WS_BASE = API_BASE.replace(/^http/, 'ws');
+  console.log('[live] Starting detection. WS endpoint:', `${WS_BASE}/ws/live`);
 
-  try {
-    _liveStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
-  } catch (err) {
-    alert('Camera access denied: ' + (err.message || err.name));
-    return;
-  }
-
+  // Show the live screen FIRST so the video element is rendered and ready
   showScreen('live');
-  $('live-video').srcObject = _liveStream;
   $('live-border').style.borderColor = 'transparent';
   $('live-verdict-badge').classList.add('hidden');
   _liveHistory = [];
 
+  // Request camera
+  try {
+    _liveStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+    console.log('[live] Camera granted, tracks:', _liveStream.getTracks().map(t => t.kind + ':' + t.readyState));
+  } catch (err) {
+    console.error('[live] Camera error:', err);
+    alert('Camera access denied: ' + (err.message || err.name));
+    setActiveMode('live');
+    return;
+  }
+
+  // Bind the stream to the video element + force play
+  const videoEl = $('live-video');
+  videoEl.srcObject = _liveStream;
+  videoEl.muted = true;
+  videoEl.playsInline = true;
+  try {
+    await videoEl.play();
+    console.log('[live] Video playing. size:', videoEl.videoWidth, 'x', videoEl.videoHeight);
+  } catch (err) {
+    console.error('[live] video.play() failed:', err);
+  }
+
+  // Connect WebSocket
   try {
     _liveWs = new WebSocket(`${WS_BASE}/ws/live`);
   } catch (err) {
+    console.error('[live] WebSocket constructor failed:', err);
     stopLiveDetection();
     alert('Could not connect to backend: ' + err.message);
     return;
   }
 
+  _liveWs.onopen = () => console.log('[live] WebSocket connected');
+  _liveWs.onclose = (e) => console.log('[live] WebSocket closed:', e.code, e.reason);
+
   _liveWs.onmessage = (e) => {
     try {
-      const { verdict, confidence_pct } = JSON.parse(e.data);
-      if (verdict) updateLiveOverlay(verdict, confidence_pct);
-    } catch (_) {}
+      const data = JSON.parse(e.data);
+      console.log('[live] Backend response:', data);
+      if (data.verdict) updateLiveOverlay(data.verdict, data.confidence_pct);
+    } catch (err) {
+      console.error('[live] Parse error:', err, e.data);
+    }
   };
 
-  _liveWs.onerror = () => {
-    stopLiveDetection();
+  _liveWs.onerror = (e) => {
+    console.error('[live] WebSocket error:', e);
   };
 
   // Send a frame every 2 seconds
@@ -1929,15 +2032,10 @@ async function startLiveDetection() {
 }
 
 function stopLiveDetection() {
-  clearInterval(_liveInterval);
-  _liveInterval = null;
-
-  if (_liveWs) { try { _liveWs.close(); } catch (_) {} _liveWs = null; }
-  if (_liveStream) { _liveStream.getTracks().forEach(t => t.stop()); _liveStream = null; }
-
-  _liveHistory = [];
-  $('live-video').srcObject = null;
-  setActiveMode('live');  // go back to live tab start screen
+  _stopLiveSessionOnly();
+  // Go back to live tab start screen — set _activeMode first to skip the auto-stop logic
+  _activeMode = 'live';
+  setActiveMode('live');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1960,11 +2058,11 @@ function initModeExtensions() {
 
   // Video dropzone drag-and-drop
   const vdz = $('video-dropzone');
-  vdz.addEventListener('dragover', e => { e.preventDefault(); vdz.classList.add('border-asli-green', 'bg-stone-50'); });
-  vdz.addEventListener('dragleave', () => vdz.classList.remove('border-asli-green', 'bg-stone-50'));
+  vdz.addEventListener('dragover', e => { e.preventDefault(); vdz.classList.add('dragging'); });
+  vdz.addEventListener('dragleave', () => vdz.classList.remove('dragging'));
   vdz.addEventListener('drop', e => {
     e.preventDefault();
-    vdz.classList.remove('border-asli-green', 'bg-stone-50');
+    vdz.classList.remove('dragging');
     const file = e.dataTransfer.files[0];
     if (file && file.type.startsWith('video/')) selectVideoFile(file);
   });

@@ -103,6 +103,37 @@ app.add_middleware(
 )
 
 
+# ───────────────────────── Model pre-warming on startup ─────────────────────────
+
+@app.on_event("startup")
+async def prewarm_models():
+    """Load and warm up the EfficientNet model on backend startup so the first
+    real request doesn't pay the cold-start cost (~60s on Mac CPU).
+    Runs in a background thread so startup isn't blocked.
+    """
+    import threading
+    import time as _time
+
+    def _warm():
+        try:
+            from PIL import Image
+            from detector import predict_with_efficientnet, predict_with_sdxl_detector
+            dummy = Image.new("RGB", (224, 224), color=(128, 128, 128))
+            t0 = _time.time()
+            print("[prewarm] Loading EfficientNet...", flush=True)
+            predict_with_efficientnet(dummy)
+            print(f"[prewarm] EfficientNet ready in {_time.time()-t0:.1f}s", flush=True)
+            t1 = _time.time()
+            print("[prewarm] Loading SDXL detector...", flush=True)
+            predict_with_sdxl_detector(dummy)
+            print(f"[prewarm] SDXL detector ready in {_time.time()-t1:.1f}s", flush=True)
+            print(f"[prewarm] All models ready in {_time.time()-t0:.1f}s", flush=True)
+        except Exception as exc:
+            print(f"[prewarm] Failed: {exc}", flush=True)
+
+    threading.Thread(target=_warm, daemon=True).start()
+
+
 # ───────────────────────── structured JSON logging middleware ─────────────────────────
 
 # Per-request bag of extra fields handlers can populate (read by middleware on exit).
@@ -433,10 +464,21 @@ async def scan_video(
         with open(tmp_path, "wb") as fh:
             fh.write(raw_bytes)
 
-        from detector import analyze_video_ensemble
+        from detector import analyze_video_fast
+        import asyncio
+        import functools
 
         try:
-            result = analyze_video_ensemble(tmp_path, target_language=normalized_language)
+            # Run blocking PyTorch inference in a threadpool so it does NOT
+            # freeze the event loop (single uvicorn worker would otherwise
+            # be unable to accept any other request while inference runs).
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    analyze_video_fast, tmp_path, target_language=normalized_language
+                ),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -457,36 +499,41 @@ async def scan_video(
 @app.websocket("/ws/live")
 async def live_detect(websocket: WebSocket):
     await websocket.accept()
+    print("[ws/live] Client connected", flush=True)
+
     from detector import (
         predict_with_efficientnet,
-        predict_with_sdxl_detector,
-        ensemble_image_predictions,
-        analyze_heuristics,
         HIGH_FAKE_THRESHOLD,
         LOW_FAKE_THRESHOLD,
     )
     from PIL import Image as _PIL_Image
+    import time as _time
+    import asyncio
 
+    loop = asyncio.get_event_loop()
+    frame_num = 0
     try:
         while True:
             data = await websocket.receive_bytes()
+            frame_num += 1
+            t0 = _time.time()
             try:
                 image = _PIL_Image.open(io.BytesIO(data)).convert("RGB")
-            except Exception:
-                await websocket.send_json({"error": "invalid image"})
+            except Exception as exc:
+                await websocket.send_json({"error": f"invalid image: {exc}"})
                 continue
 
-            eff_result  = predict_with_efficientnet(image)
-            sdxl_result = predict_with_sdxl_detector(image)
-            heuristic   = analyze_heuristics(image)
-
-            ensemble = ensemble_image_predictions(
-                eff_result, sdxl_result,
-                heuristic_score=heuristic["heuristic_score"],
-                fft_score=heuristic.get("fft_score"),
-                clip_score=heuristic.get("clip_score"),
-            )
-            fake_score = ensemble["fake_probability"]
+            # Lightweight: EfficientNet only, no Organika, no Gemini.
+            # Run in threadpool so blocking inference doesn't freeze the
+            # event loop (which would block /scan-video and other clients).
+            try:
+                eff_result = await loop.run_in_executor(
+                    None, predict_with_efficientnet, image
+                )
+                fake_score = float(eff_result.get("fake_probability", 0.5))
+            except Exception as exc:
+                await websocket.send_json({"error": f"inference failed: {exc}"})
+                continue
 
             if fake_score >= HIGH_FAKE_THRESHOLD:
                 verdict = "Nakli"
@@ -496,6 +543,9 @@ async def live_detect(websocket: WebSocket):
                 verdict = "Shak hai"
 
             confidence_pct = int(min(abs(fake_score - 0.5) * 200, 99))
+            elapsed = _time.time() - t0
+
+            print(f"[ws/live] Frame {frame_num}: {verdict} ({fake_score:.3f}) — {elapsed*1000:.0f}ms", flush=True)
 
             await websocket.send_json({
                 "verdict":        verdict,
@@ -503,8 +553,9 @@ async def live_detect(websocket: WebSocket):
                 "confidence_pct": confidence_pct,
             })
     except WebSocketDisconnect:
-        pass
+        print(f"[ws/live] Client disconnected after {frame_num} frames", flush=True)
     except Exception as exc:
+        print(f"[ws/live] Error: {exc}", flush=True)
         try:
             await websocket.send_json({"error": str(exc)})
         except Exception:

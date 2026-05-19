@@ -1,18 +1,18 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#FAFAF9" />
-  <title>Asli — असली या नक़ली? · AI Image Verification</title>
-  <meta name="description" content="Detect AI-generated and manipulated images. Plain-language explanations in Hindi, Gujarati, or English. Free." />
+  <meta name="theme-color" content="#0B0F1A" />
+  <title>Asli — AI Image & Deepfake Verification</title>
+  <meta name="description" content="Detect AI-generated and manipulated images, videos, and live deepfakes. Plain-language explanations in Hindi, Gujarati, or English. Free." />
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;500;600;700&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;500;600;700&display=swap"
     rel="stylesheet"
   />
 
@@ -23,20 +23,28 @@
       theme: {
         extend: {
           colors: {
-            'asli-green':       '#16A34A',
+            'asli-green':       '#15A34A',
             'asli-green-light': '#DCFCE7',
             'nakli-red':        '#DC2626',
             'nakli-red-light':  '#FEE2E2',
             'shak-amber':       '#D97706',
             'shak-amber-light': '#FEF3C7',
-            'asli-bg':          '#FAFAF9',
-            'asli-text':        '#1C1917',
-            'asli-muted':       '#78716C',
+            'asli-bg':          '#F7F8FA',
+            'asli-text':        '#0F172A',
+            'asli-muted':       '#64748B',
+            'brand':            '#10B981',
+            'brand-deep':       '#047857',
+            'ink':              '#0B0F1A',
           },
           fontFamily: {
             sans:  ['Inter', 'system-ui', 'sans-serif'],
             deva:  ['"Noto Sans Devanagari"', 'Inter', 'sans-serif'],
             guja:  ['"Noto Sans Gujarati"',   'Inter', 'sans-serif'],
+          },
+          boxShadow: {
+            'card':   '0 1px 2px rgba(15,23,42,.04), 0 8px 24px -8px rgba(15,23,42,.10)',
+            'lift':   '0 4px 12px -2px rgba(15,23,42,.08), 0 16px 40px -12px rgba(15,23,42,.14)',
+            'glow':   '0 0 0 1px rgba(16,185,129,.20), 0 12px 32px -8px rgba(16,185,129,.35)',
           },
         },
       },
@@ -56,38 +64,132 @@
 
   <link rel="stylesheet" href="styles.css" />
 
-  <!-- ─── API endpoint ────────────────────────────────────────────────────
-       After Cloud Run deploy, replace the localhost URL below with the
-       Cloud Run URL printed by:  gcloud run deploy asli-api ...
-       It looks like: https://asli-api-xxxxxxxxxx-as.a.run.app
-  ─────────────────────────────────────────────────────────────────────── -->
   <script>
     window.ASLI_API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? 'http://localhost:8000'
       : 'https://asli-api-229619506340.asia-south1.run.app';
   </script>
 </head>
-<body class="bg-asli-bg text-asli-text antialiased min-h-screen flex flex-col font-sans">
+<body class="bg-asli-bg text-asli-text antialiased min-h-screen font-sans">
+
+  <!-- ════════════════════════════════════════════════════════════════
+       AUTH GATE — professional landing / sign-in (shown before the app)
+  ═════════════════════════════════════════════════════════════════ -->
+  <div id="auth-gate" class="auth-gate">
+    <div class="auth-gate-bg" aria-hidden="true">
+      <span class="orb orb-1"></span>
+      <span class="orb orb-2"></span>
+      <span class="orb orb-3"></span>
+      <div class="grid-overlay"></div>
+    </div>
+
+    <div class="auth-gate-inner">
+      <!-- Left: brand story -->
+      <section class="auth-hero">
+        <div class="auth-brand">
+          <img src="assets/logo.svg" alt="Asli" class="w-10 h-10" />
+          <span class="auth-brand-name">Asli</span>
+          <span class="auth-brand-badge">AI Verification</span>
+        </div>
+
+        <h1 class="auth-headline">
+          Is it <span class="grad-text">real</span>,<br />or AI-generated?
+        </h1>
+        <p class="auth-sub">
+          Detect deepfakes and AI-manipulated media in seconds — across
+          photos, videos, and live video calls. Clear, plain-language
+          verdicts in your language.
+        </p>
+
+        <ul class="auth-features">
+          <li>
+            <span class="feat-ic"><i data-lucide="image"></i></span>
+            <div>
+              <strong>Photo forensics</strong>
+              <p>Multi-model AI ensemble with explainable verdicts</p>
+            </div>
+          </li>
+          <li>
+            <span class="feat-ic"><i data-lucide="video"></i></span>
+            <div>
+              <strong>Video analysis</strong>
+              <p>Frame-by-frame deepfake detection in seconds</p>
+            </div>
+          </li>
+          <li>
+            <span class="feat-ic"><i data-lucide="radio"></i></span>
+            <div>
+              <strong>Live interview guard</strong>
+              <p>Real-time webcam deepfake monitoring</p>
+            </div>
+          </li>
+        </ul>
+
+        <div class="auth-trust">
+          <span><i data-lucide="shield-check"></i> Privacy-first · nothing stored</span>
+          <span><i data-lucide="languages"></i> हिंदी · ગુજરાતી · English</span>
+        </div>
+      </section>
+
+      <!-- Right: sign-in card -->
+      <section class="auth-card">
+        <div class="auth-card-glow" aria-hidden="true"></div>
+        <div class="auth-card-body">
+          <h2 class="auth-card-title">Welcome</h2>
+          <p class="auth-card-desc">Sign in to start verifying media and keep a private history of your scans.</p>
+
+          <button id="gate-google-btn" type="button" class="gate-google">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            <span>Continue with Google</span>
+          </button>
+
+          <div class="gate-divider"><span>or</span></div>
+
+          <button id="gate-skip" type="button" class="gate-skip">
+            Continue as guest
+          </button>
+
+          <p class="gate-legal">
+            By continuing you agree to our
+            <a href="privacy.html" target="_blank">Privacy Policy</a>.
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <footer class="auth-foot">Built for Google Solution Challenge 2026</footer>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       APP SHELL — hidden until authenticated / guest
+  ═════════════════════════════════════════════════════════════════ -->
+  <div id="app-shell" class="app-shell hidden">
+
+  <!-- Decorative professional backdrop (fixed, behind all content) -->
+  <div id="app-bg" aria-hidden="true">
+    <span class="app-orb app-orb-1"></span>
+    <span class="app-orb app-orb-2"></span>
+    <span class="app-orb app-orb-3"></span>
+    <div class="app-grid"></div>
+  </div>
 
   <!-- ─── Header ─── -->
-  <header class="sticky top-0 z-30 bg-asli-bg/85 backdrop-blur border-b border-stone-200">
-    <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+  <header class="sticky top-0 z-30 bg-white/80 backdrop-blur-xl border-b border-slate-200/70">
+    <div class="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <img src="assets/logo.svg" alt="Asli" class="w-8 h-8" />
         <span class="font-extrabold text-lg tracking-tight">Asli</span>
       </div>
       <div class="flex items-center gap-2">
-        <!-- Language toggle pill -->
-        <div class="flex items-center gap-1 text-sm bg-white border border-stone-200 rounded-full p-0.5">
-          <button data-lang="hi" class="lang-btn px-3 py-1 rounded-full font-semibold font-deva transition">हिं</button>
-          <button data-lang="gu" class="lang-btn px-3 py-1 rounded-full font-semibold font-guja transition">ગુ</button>
-          <button data-lang="en" class="lang-btn px-3 py-1 rounded-full font-semibold transition">EN</button>
-        </div>
-
-        <!-- Settings gear — always visible -->
+        <!-- Settings gear — always visible (language lives in Settings) -->
         <button
           id="settings-gear-btn"
-          class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white hover:shadow-sm transition text-asli-muted hover:text-asli-text"
+          class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 transition text-asli-muted hover:text-asli-text"
           aria-label="Open settings"
           title="Settings">
           <i data-lucide="settings" class="w-5 h-5"></i>
@@ -99,9 +201,8 @@
           <!-- LOGGED-OUT: Sign in with Google button -->
           <button
             id="auth-signin-btn"
-            class="flex items-center gap-1.5 bg-white border border-[#dadce0] rounded-lg px-3 py-1.5 text-xs font-medium text-[#3c4043] hover:bg-gray-50 active:bg-gray-100 transition select-none"
+            class="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition select-none shadow-sm"
             style="min-height:36px">
-            <!-- Real Google G (brand colours) -->
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -114,27 +215,27 @@
           <!-- LOGGED-IN: Avatar + first name + chevron -->
           <button
             id="auth-user-btn"
-            class="hidden items-center gap-1.5 rounded-full hover:bg-stone-100 active:bg-stone-200 px-2 py-1 transition select-none"
+            class="hidden items-center gap-1.5 rounded-full hover:bg-slate-100 active:bg-slate-200 px-2 py-1 transition select-none"
             style="min-height:36px"
             aria-haspopup="true"
             aria-expanded="false">
-            <img id="auth-avatar" class="w-7 h-7 rounded-full object-cover bg-stone-200 shrink-0" alt="Profile" />
-            <span id="auth-username" class="text-sm font-medium max-w-[72px] truncate text-asli-text"></span>
+            <img id="auth-avatar" class="w-7 h-7 rounded-full object-cover bg-slate-200 shrink-0" alt="Profile" />
+            <span id="auth-username" class="text-sm font-semibold max-w-[72px] truncate text-asli-text"></span>
             <i data-lucide="chevron-down" class="w-4 h-4 text-asli-muted shrink-0"></i>
           </button>
 
           <!-- Dropdown menu -->
           <div
             id="auth-dropdown"
-            class="hidden absolute right-0 top-full mt-2 bg-white border border-stone-200 rounded-xl shadow-xl min-w-[180px] py-1 z-50"
+            class="hidden absolute right-0 top-full mt-2 bg-white border border-slate-200 rounded-xl shadow-lift min-w-[180px] py-1 z-50"
             role="menu">
-            <button id="my-scans-btn" class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-stone-50 flex items-center gap-2.5 transition" role="menuitem">
+            <button id="my-scans-btn" class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-slate-50 flex items-center gap-2.5 transition" role="menuitem">
               <span aria-hidden="true">📋</span> My Scans
             </button>
-            <button id="settings-btn" class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-stone-50 flex items-center gap-2.5 transition" role="menuitem">
+            <button id="settings-btn" class="w-full text-left px-4 py-2.5 text-sm text-asli-text hover:bg-slate-50 flex items-center gap-2.5 transition" role="menuitem">
               <span aria-hidden="true">⚙️</span> Settings
             </button>
-            <div class="border-t border-stone-100 my-1" role="separator"></div>
+            <div class="border-t border-slate-100 my-1" role="separator"></div>
             <button
               id="auth-signout-btn"
               class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition"
@@ -149,24 +250,27 @@
   </header>
 
   <!-- ─── Main ─── -->
-  <main class="flex-1 max-w-md mx-auto w-full px-4 py-6">
+  <main class="flex-1 w-full max-w-5xl mx-auto px-6 py-8 flex flex-col sm:flex-row gap-6 sm:gap-10">
 
-    <!-- Mode tab switcher: Photo / Video / Live -->
-    <div id="mode-tabs" class="flex rounded-xl overflow-hidden border border-stone-200 mb-6 bg-white shadow-sm">
-      <button data-mode="photo" class="mode-tab flex-1 py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 transition">
-        <i data-lucide="image" class="w-4 h-4"></i> Photo
+    <!-- Mode sidebar: Photo / Video / Live -->
+    <aside id="mode-sidebar" class="flex sm:flex-col gap-2 sm:w-48 shrink-0 sm:sticky sm:top-20 sm:self-start">
+      <button data-mode="photo" class="mode-tab flex-1 sm:flex-none px-4 py-3 text-sm font-semibold flex items-center justify-center sm:justify-start gap-2.5 transition rounded-xl bg-white border border-slate-200 shadow-card sm:shadow-none">
+        <i data-lucide="image" class="w-4 h-4 shrink-0"></i> <span>Photo</span>
       </button>
-      <button data-mode="video" class="mode-tab flex-1 py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 transition border-x border-stone-200">
-        <i data-lucide="video" class="w-4 h-4"></i> Video
+      <button data-mode="video" class="mode-tab flex-1 sm:flex-none px-4 py-3 text-sm font-semibold flex items-center justify-center sm:justify-start gap-2.5 transition rounded-xl bg-white border border-slate-200 shadow-card sm:shadow-none">
+        <i data-lucide="video" class="w-4 h-4 shrink-0"></i> <span>Video</span>
       </button>
-      <button data-mode="live" class="mode-tab flex-1 py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 transition">
-        <i data-lucide="radio" class="w-4 h-4"></i> Live
+      <button data-mode="live" class="mode-tab flex-1 sm:flex-none px-4 py-3 text-sm font-semibold flex items-center justify-center sm:justify-start gap-2.5 transition rounded-xl bg-white border border-slate-200 shadow-card sm:shadow-none">
+        <i data-lucide="radio" class="w-4 h-4 shrink-0"></i> <span>Live</span>
       </button>
-    </div>
+    </aside>
+
+    <!-- Content column -->
+    <div class="flex-1 min-w-0 w-full max-w-xl">
 
     <!-- SCREEN A — UPLOAD (two sub-states: pick → ready) -->
     <section id="screen-upload" class="screen">
-      <div class="text-center mb-8 mt-4">
+      <div class="text-center mb-8 mt-2">
         <h1 id="hero" class="text-4xl font-extrabold tracking-tight leading-tight mb-3"></h1>
         <p id="subhero" class="text-asli-muted text-base"></p>
       </div>
@@ -179,27 +283,27 @@
         <label
           id="dropzone"
           for="file-input"
-          class="block cursor-pointer rounded-2xl border-2 border-dashed border-stone-300 bg-white px-6 py-12 text-center transition-all hover:border-asli-green hover:bg-stone-50">
+          class="block cursor-pointer rounded-2xl border-2 border-dashed border-slate-300 bg-white px-6 py-12 text-center transition-all hover:border-brand hover:bg-emerald-50/40 shadow-card">
           <div class="flex flex-col items-center gap-3">
-            <div class="w-16 h-16 rounded-full bg-asli-green-light flex items-center justify-center">
-              <i data-lucide="upload-cloud" class="w-8 h-8 text-asli-green"></i>
+            <div class="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center ring-1 ring-emerald-100">
+              <i data-lucide="upload-cloud" class="w-8 h-8 text-brand"></i>
             </div>
-            <p id="dropzone-text" class="font-semibold text-asli-text"></p>
+            <p id="dropzone-text" class="font-bold text-asli-text"></p>
             <p id="dropzone-hint" class="text-sm text-asli-muted"></p>
           </div>
         </label>
         <input id="file-input" type="file" accept="image/*" class="sr-only" />
 
-        <div class="flex items-center my-6 gap-3 text-stone-400 text-xs uppercase tracking-wider">
-          <div class="flex-1 h-px bg-stone-200"></div>
+        <div class="flex items-center my-6 gap-3 text-slate-400 text-xs uppercase tracking-wider">
+          <div class="flex-1 h-px bg-slate-200"></div>
           <span id="or-text">or</span>
-          <div class="flex-1 h-px bg-stone-200"></div>
+          <div class="flex-1 h-px bg-slate-200"></div>
         </div>
 
         <button
           id="camera-btn"
           type="button"
-          class="cursor-pointer rounded-xl bg-asli-text text-white font-semibold py-4 text-center flex items-center justify-center gap-2 hover:bg-stone-800 transition w-full">
+          class="cursor-pointer rounded-2xl bg-ink text-white font-semibold py-4 text-center flex items-center justify-center gap-2 hover:bg-slate-800 transition w-full shadow-lift">
           <i data-lucide="camera" class="w-5 h-5"></i>
           <span id="camera-text">Take a photo</span>
         </button>
@@ -211,8 +315,8 @@
 
       <!-- Sub-state 2: READY-TO-EVALUATE (file picked, awaiting confirmation) -->
       <div id="upload-ready" class="hidden">
-        <div class="rounded-2xl bg-white border border-stone-200 p-3 mb-4 shadow-sm">
-          <div class="rounded-xl overflow-hidden bg-stone-100 aspect-[4/3] flex items-center justify-center">
+        <div class="rounded-2xl bg-white border border-slate-200 p-3 mb-4 shadow-card">
+          <div class="rounded-xl overflow-hidden bg-slate-100 aspect-[4/3] flex items-center justify-center">
             <img id="preview-image" alt="" class="w-full h-full object-contain" />
           </div>
           <div class="flex items-center justify-between mt-3 px-1">
@@ -231,7 +335,7 @@
 
         <button
           id="evaluate-btn"
-          class="w-full rounded-xl bg-asli-green text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-green-700 transition shadow-md">
+          class="w-full rounded-2xl bg-brand text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-brand-deep transition shadow-glow">
           <i data-lucide="shield-check" class="w-5 h-5"></i>
           <span id="evaluate-text"></span>
         </button>
@@ -246,12 +350,12 @@
           <label
             id="video-dropzone"
             for="video-file-input"
-            class="block cursor-pointer rounded-2xl border-2 border-dashed border-stone-300 bg-white px-6 py-12 text-center transition-all hover:border-asli-green hover:bg-stone-50">
+            class="block cursor-pointer rounded-2xl border-2 border-dashed border-slate-300 bg-white px-6 py-12 text-center transition-all hover:border-brand hover:bg-emerald-50/40 shadow-card">
             <div class="flex flex-col items-center gap-3">
-              <div class="w-16 h-16 rounded-full bg-asli-green-light flex items-center justify-center">
-                <i data-lucide="video" class="w-8 h-8 text-asli-green"></i>
+              <div class="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center ring-1 ring-emerald-100">
+                <i data-lucide="video" class="w-8 h-8 text-brand"></i>
               </div>
-              <p class="font-semibold text-asli-text">Upload a video to verify</p>
+              <p class="font-bold text-asli-text">Upload a video to verify</p>
               <p class="text-sm text-asli-muted">MP4 · MOV · WebM · AVI</p>
             </div>
           </label>
@@ -260,8 +364,8 @@
 
         <!-- Ready state -->
         <div id="video-ready" class="hidden">
-          <div class="rounded-2xl bg-white border border-stone-200 p-3 mb-4 shadow-sm">
-            <div class="rounded-xl overflow-hidden bg-stone-100 aspect-[4/3] flex items-center justify-center">
+          <div class="rounded-2xl bg-white border border-slate-200 p-3 mb-4 shadow-card">
+            <div class="rounded-xl overflow-hidden bg-slate-100 aspect-[4/3] flex items-center justify-center">
               <video id="video-preview" class="w-full h-full object-contain" muted preload="metadata"></video>
             </div>
             <div class="flex items-center justify-between mt-3 px-1">
@@ -276,7 +380,7 @@
           </div>
           <button
             id="evaluate-video-btn"
-            class="w-full rounded-xl bg-asli-green text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-green-700 transition shadow-md">
+            class="w-full rounded-2xl bg-brand text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-brand-deep transition shadow-glow">
             <i data-lucide="shield-check" class="w-5 h-5"></i>
             <span>Analyze this video</span>
           </button>
@@ -285,15 +389,15 @@
 
       <!-- ── Live tab content ── -->
       <div id="upload-live-tab" class="hidden">
-        <div class="rounded-2xl bg-white border border-stone-200 p-6 text-center shadow-sm mb-4">
-          <div class="w-16 h-16 rounded-full bg-nakli-red-light flex items-center justify-center mx-auto mb-4">
+        <div class="rounded-2xl bg-white border border-slate-200 p-6 text-center shadow-card mb-4">
+          <div class="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4 ring-1 ring-red-100">
             <i data-lucide="radio" class="w-8 h-8 text-nakli-red"></i>
           </div>
           <h2 class="font-bold text-lg text-asli-text mb-1">Live Interview Detection</h2>
-          <p class="text-sm text-asli-muted mb-5">Point your camera at the person being interviewed. The system will analyze each frame for deepfake signals in real time.</p>
+          <p class="text-sm text-asli-muted mb-5">Point your camera at the person being interviewed. The system analyzes each frame for deepfake signals in real time.</p>
           <button
             id="start-live-btn"
-            class="w-full rounded-xl bg-asli-text text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-stone-800 transition shadow-md">
+            class="w-full rounded-2xl bg-ink text-white font-bold py-4 text-base flex items-center justify-center gap-2 hover:bg-slate-800 transition shadow-lift">
             <i data-lucide="video" class="w-5 h-5"></i>
             Start Live Detection
           </button>
@@ -305,17 +409,14 @@
 
     <!-- SCREEN D — LIVE DETECTION -->
     <section id="screen-live" class="screen hidden">
-      <div class="relative rounded-2xl overflow-hidden bg-black shadow-xl mb-4" style="aspect-ratio:4/3">
+      <div class="relative rounded-2xl overflow-hidden bg-black shadow-lift mb-4" style="aspect-ratio:4/3">
         <video id="live-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
-        <!-- Colored border overlay -->
         <div id="live-border" class="absolute inset-0 rounded-2xl border-4 border-transparent transition-colors duration-500 pointer-events-none"></div>
-        <!-- Verdict badge overlay -->
         <div id="live-verdict-badge" class="hidden absolute bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 rounded-full font-bold text-white text-sm shadow-lg flex items-center gap-2">
           <span id="live-verdict-dot" class="w-2.5 h-2.5 rounded-full bg-white animate-pulse"></span>
           <span id="live-verdict-text">Analyzing...</span>
           <span id="live-confidence-text" class="opacity-75"></span>
         </div>
-        <!-- Scanning indicator (top-left) -->
         <div class="absolute top-3 left-3 flex items-center gap-1.5 bg-black/50 rounded-full px-3 py-1">
           <span class="w-2 h-2 rounded-full bg-nakli-red animate-pulse"></span>
           <span class="text-white text-xs font-medium">LIVE</span>
@@ -323,7 +424,7 @@
       </div>
       <button
         id="stop-live-btn"
-        class="w-full rounded-xl bg-white border-2 border-stone-200 text-asli-text font-semibold py-3 flex items-center justify-center gap-2 hover:bg-stone-50 transition">
+        class="w-full rounded-2xl bg-white border border-slate-200 text-asli-text font-semibold py-3 flex items-center justify-center gap-2 hover:bg-slate-50 transition shadow-card">
         <i data-lucide="square" class="w-4 h-4"></i>
         Stop Detection
       </button>
@@ -332,7 +433,7 @@
     <!-- SCREEN B — SCANNING -->
     <section id="screen-scanning" class="screen hidden">
       <div class="text-center pt-6">
-        <div class="relative inline-block rounded-2xl overflow-hidden bg-stone-100 mb-8 max-w-xs shadow-lg">
+        <div class="relative inline-block rounded-2xl overflow-hidden bg-slate-100 mb-8 max-w-xs shadow-lift">
           <img id="scanning-image" alt="" class="w-full h-auto blur-sm opacity-75" />
           <div class="absolute inset-0 pointer-events-none">
             <div class="scan-line"></div>
@@ -340,26 +441,26 @@
           <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/10"></div>
         </div>
         <div class="flex items-center justify-center gap-2 mb-3">
-          <span class="w-2.5 h-2.5 rounded-full bg-asli-green animate-pulse"></span>
-          <span class="w-2.5 h-2.5 rounded-full bg-asli-green animate-pulse" style="animation-delay: 200ms"></span>
-          <span class="w-2.5 h-2.5 rounded-full bg-asli-green animate-pulse" style="animation-delay: 400ms"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-brand animate-pulse"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-brand animate-pulse" style="animation-delay: 200ms"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-brand animate-pulse" style="animation-delay: 400ms"></span>
         </div>
-        <p id="scan-status" class="text-asli-text font-medium text-base"></p>
+        <p id="scan-status" class="text-asli-text font-semibold text-base"></p>
       </div>
     </section>
 
     <!-- SCREEN C — RESULT -->
     <section id="screen-result" class="screen hidden">
       <!-- Verdict badge -->
-      <div id="verdict-badge" class="rounded-2xl p-6 text-center mb-5">
+      <div id="verdict-badge" class="rounded-2xl p-6 text-center mb-5 shadow-lift">
         <div id="verdict-icon" class="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center mx-auto mb-3"></div>
         <p id="verdict-label" class="text-white text-3xl font-extrabold tracking-tight"></p>
         <p id="confidence-text" class="text-white/85 text-sm mt-1"></p>
       </div>
 
       <!-- Confidence + thumbnail row -->
-      <div class="flex items-center gap-4 mb-5 bg-white rounded-xl p-4 border border-stone-200">
-        <img id="result-thumb" alt="" class="w-16 h-16 rounded-lg object-cover bg-stone-100 shrink-0" />
+      <div class="flex items-center gap-4 mb-4 bg-white rounded-2xl p-4 border border-slate-200 shadow-card">
+        <img id="result-thumb" alt="" class="w-16 h-16 rounded-xl object-cover bg-slate-100 shrink-0" />
         <div class="flex-1 min-w-0">
           <p id="confidence-label-i18n" class="text-xs uppercase tracking-wider text-asli-muted mb-1"></p>
           <p class="text-3xl font-extrabold leading-none">
@@ -369,21 +470,21 @@
       </div>
 
       <!-- Explanation card -->
-      <div class="bg-white rounded-xl p-5 mb-4 border border-stone-200">
+      <div class="bg-white rounded-2xl p-5 mb-4 border border-slate-200 shadow-card">
         <p id="explanation-label" class="text-xs uppercase tracking-wider text-asli-muted mb-2"></p>
         <p id="explanation-text" class="text-asli-text leading-relaxed"></p>
       </div>
 
       <!-- Red flags card -->
-      <div id="redflags-container" class="bg-white rounded-xl p-5 mb-4 border border-stone-200">
+      <div id="redflags-container" class="bg-white rounded-2xl p-5 mb-4 border border-slate-200 shadow-card">
         <p id="redflags-label" class="text-xs uppercase tracking-wider text-asli-muted mb-3"></p>
         <ul id="redflags-list" class="space-y-2"></ul>
       </div>
 
       <!-- Tip card -->
-      <div class="rounded-xl p-5 mb-6 bg-amber-50 border border-amber-200">
+      <div class="rounded-2xl p-5 mb-6 bg-amber-50 border border-amber-200">
         <div class="flex gap-3">
-          <div class="w-9 h-9 shrink-0 rounded-lg bg-amber-100 flex items-center justify-center">
+          <div class="w-9 h-9 shrink-0 rounded-xl bg-amber-100 flex items-center justify-center">
             <i data-lucide="lightbulb" class="w-5 h-5 text-amber-700"></i>
           </div>
           <div class="min-w-0">
@@ -396,7 +497,7 @@
       <!-- Save-to-history banner (guests only, shown after scan completes) -->
       <div
         id="save-banner"
-        class="hidden items-center justify-between gap-3 rounded-xl px-4 py-3 mb-4"
+        class="hidden items-center justify-between gap-3 rounded-2xl px-4 py-3 mb-4"
         style="background:#EFF6FF;border:1px solid #BFDBFE;">
         <span class="text-sm text-blue-800">💾 Sign in to save this result to your history</span>
         <button id="save-banner-signin-btn" class="text-sm font-semibold text-blue-700 hover:underline shrink-0 transition">Sign in</button>
@@ -404,20 +505,20 @@
 
       <!-- Action buttons -->
       <div class="grid grid-cols-2 gap-3">
-        <button id="scan-another-btn" class="rounded-xl bg-asli-text text-white font-semibold py-4 hover:bg-stone-800 transition">
+        <button id="scan-another-btn" class="rounded-2xl bg-ink text-white font-semibold py-4 hover:bg-slate-800 transition shadow-lift">
           <span id="scan-another-text"></span>
         </button>
-        <button id="share-btn" class="rounded-xl bg-asli-green text-white font-semibold py-4 hover:bg-green-700 transition flex items-center justify-center gap-2">
+        <button id="share-btn" class="rounded-2xl bg-brand text-white font-semibold py-4 hover:bg-brand-deep transition flex items-center justify-center gap-2 shadow-glow">
           <i data-lucide="share-2" class="w-5 h-5"></i>
           <span id="share-text"></span>
         </button>
       </div>
 
-      <!-- Download PDF report (full width, verdict-colored outline button) -->
+      <!-- Download PDF report -->
       <button
         id="download-pdf-btn"
-        class="w-full mt-3 rounded-xl bg-white border-2 font-semibold py-4 flex items-center justify-center gap-2 transition hover:opacity-90 active:scale-[.98]"
-        style="border-color:#16A34A;color:#16A34A;min-height:52px">
+        class="w-full mt-3 rounded-2xl bg-white border-2 font-semibold py-4 flex items-center justify-center gap-2 transition hover:opacity-90 active:scale-[.98] shadow-card"
+        style="border-color:#10B981;color:#047857;min-height:52px">
         <i data-lucide="file-down" class="w-5 h-5"></i>
         <span id="download-pdf-label">↓  Download Verification Certificate</span>
       </button>
@@ -425,17 +526,19 @@
 
     <!-- ERROR STATE -->
     <section id="screen-error" class="screen hidden">
-      <div class="bg-red-50 border border-red-200 rounded-xl p-6 text-center mt-6">
-        <div class="w-16 h-16 rounded-full bg-red-100 mx-auto mb-3 flex items-center justify-center">
+      <div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-center mt-6 shadow-card">
+        <div class="w-16 h-16 rounded-2xl bg-red-100 mx-auto mb-3 flex items-center justify-center">
           <i data-lucide="alert-triangle" class="w-8 h-8 text-red-600"></i>
         </div>
         <p id="error-title" class="font-semibold mb-2"></p>
         <p id="error-message" class="text-sm text-asli-muted mb-4 break-words"></p>
-        <button id="retry-btn" class="rounded-xl bg-asli-text text-white font-semibold py-3 px-6">
+        <button id="retry-btn" class="rounded-2xl bg-ink text-white font-semibold py-3 px-6">
           <span id="retry-text"></span>
         </button>
       </div>
     </section>
+
+    </div><!-- /content column -->
 
   </main>
 
@@ -443,11 +546,13 @@
     <span id="footer-text"></span>
   </footer>
 
+  </div><!-- /#app-shell -->
+
   <!-- ─── Settings panel (off-canvas, slides in from right) ─── -->
   <div id="settings-panel" class="off-canvas-panel" role="dialog" aria-modal="true" aria-label="Settings">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-stone-200 shrink-0">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0">
       <h2 class="text-base font-bold text-asli-text">Settings</h2>
-      <button id="close-settings" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-stone-100 text-asli-muted transition" aria-label="Close settings">
+      <button id="close-settings" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-asli-muted transition" aria-label="Close settings">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
     </div>
@@ -460,7 +565,7 @@
       <h3 id="confirm-title" class="text-base font-bold text-asli-text mb-2"></h3>
       <div id="confirm-body" class="text-sm text-asli-muted mb-6 leading-relaxed"></div>
       <div class="flex gap-3">
-        <button id="confirm-cancel" class="flex-1 rounded-xl bg-stone-100 text-asli-text font-semibold py-3 text-sm hover:bg-stone-200 transition">Cancel</button>
+        <button id="confirm-cancel" class="flex-1 rounded-xl bg-slate-100 text-asli-text font-semibold py-3 text-sm hover:bg-slate-200 transition">Cancel</button>
         <button id="confirm-ok" class="flex-1 rounded-xl text-white font-semibold py-3 text-sm hover:bg-red-700 transition" style="background:#DC2626">Delete permanently</button>
       </div>
     </div>
@@ -468,18 +573,15 @@
 
   <!-- ─── History panel (off-canvas, slides in from right) ─── -->
   <div id="history-panel" class="off-canvas-panel" role="dialog" aria-modal="true" aria-label="My Scans">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-stone-200 shrink-0">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0">
       <h2 class="text-base font-bold text-asli-text">My Scans</h2>
-      <button id="close-history" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-stone-100 text-asli-muted transition" aria-label="Close panel">
+      <button id="close-history" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-asli-muted transition" aria-label="Close panel">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
     </div>
-    <!-- Stats bar: Total / Fake / Real / Uncertain counts -->
-    <div id="history-stats-bar" class="px-5 py-2.5 text-xs flex items-center gap-4 bg-stone-50 border-b border-stone-100 shrink-0 min-h-[36px]"></div>
-    <!-- Scrollable scan list -->
+    <div id="history-stats-bar" class="px-5 py-2.5 text-xs flex items-center gap-4 bg-slate-50 border-b border-slate-100 shrink-0 min-h-[36px]"></div>
     <div id="history-list" class="flex-1 overflow-y-auto px-4 py-3 space-y-3"></div>
   </div>
-  <!-- Dim overlay behind the panel -->
   <div id="panel-overlay"></div>
 
   <!-- Camera capture modal (desktop webcam / mobile fallback) -->
