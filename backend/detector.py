@@ -21,7 +21,7 @@ HIGH_FAKE_THRESHOLD = 0.68
 MAX_FALLBACK_CONFIDENCE = 0.40
 MAX_DOCUMENT_BYTES = 2_000_000
 MODEL_INPUT_SIZE = (224, 224)
-GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
 CLIP_MODEL_NAME = os.getenv("CLIP_MODEL_NAME", "openai/clip-vit-base-patch32").strip() or "openai/clip-vit-base-patch32"
 # Model 1: EfficientNet fine-tuned for AI image detection — 95% acc, F1=0.94 on benchmark
 EFFICIENTNET_MODEL_NAME = os.getenv("EFFICIENTNET_MODEL_NAME", "haywoodsloan/ai-image-detector-deploy").strip() or "haywoodsloan/ai-image-detector-deploy"
@@ -199,6 +199,70 @@ def _gemini_tiebreak_score(image: Image.Image, ensemble_score: float) -> "float 
         response = model.generate_content([prompt, image])
         fp = _clamp(float(_parse_gemini_json(response).get("fake_probability", ensemble_score)))
         print(f"Gemini tiebreak score: {fp:.4f}", flush=True)
+        return fp
+    except Exception as exc:
+        _log_gemini_error(exc)
+        return None
+
+
+def _gemini_video_tiebreak(video_path: str) -> "float | None":
+    """Send the whole video to Gemini for direct AI-generation assessment.
+
+    Gemini 2.5 Flash supports video input and has seen modern generative video
+    (Sora / Runway / Veo / Seedance / Pika) during training, so it can identify
+    stylistic and temporal patterns characteristic of those models.
+
+    Uses a separate quota bucket from image generation, so it can succeed even
+    when per-image Gemini calls are rate-limited.
+    Returns a fake_probability (0–1) or None on any failure. Never raises.
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        import google.generativeai as genai
+        import time as _time
+        genai.configure(api_key=api_key)
+
+        _t0 = _time.time()
+        print(f"[gemini-video] Uploading {video_path}...", flush=True)
+        video_file = genai.upload_file(path=video_path)
+        # Wait until processing is complete (ACTIVE state)
+        while video_file.state.name == "PROCESSING":
+            _time.sleep(2)
+            video_file = genai.get_file(video_file.name)
+            if _time.time() - _t0 > 60:
+                print("[gemini-video] Upload processing timed out", flush=True)
+                return None
+        if video_file.state.name != "ACTIVE":
+            print(f"[gemini-video] Upload final state: {video_file.state.name}", flush=True)
+            return None
+        print(f"[gemini-video] Upload+process: {_time.time()-_t0:.1f}s", flush=True)
+
+        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        prompt = (
+            "You are a video forensics expert specializing in distinguishing real "
+            "footage from modern generative AI video (Sora, Runway Gen-3/4, Veo, "
+            "Pika, Seedance, Kling). Analyze this video for: \n"
+            "  • temporal incoherence (objects subtly morphing across frames)\n"
+            "  • impossible physics or motion\n"
+            "  • prompt-driven aesthetic (rapid stylized backgrounds, mixed-media, "
+            "    scene composition that reads like a text prompt)\n"
+            "  • diffusion artifacts (slight haze, oversharp edges, plastic skin)\n"
+            "  • unnatural eye/mouth/hand motion\n"
+            "Output ONLY valid JSON, no other text:\n"
+            "  {\"fake_probability\": <float 0.0-1.0>, \"reason\": \"<short>\"}\n"
+            "1.0 = definitely AI-generated. 0.0 = definitely real footage."
+        )
+        _t_inf = _time.time()
+        response = model.generate_content([prompt, video_file])
+        parsed = _parse_gemini_json(response)
+        fp_raw = parsed.get("fake_probability")
+        if fp_raw is None:
+            print("[gemini-video] No fake_probability in response", flush=True)
+            return None
+        fp = _clamp(float(fp_raw))
+        print(f"[gemini-video] Verdict: {fp:.4f} ({_time.time()-_t_inf:.1f}s inference) — reason: {parsed.get('reason','')[:120]}", flush=True)
         return fp
     except Exception as exc:
         _log_gemini_error(exc)
@@ -1655,56 +1719,72 @@ def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict
         eff_mean    = float(np.mean(per_frame_scores))
         eff_max     = float(np.max(per_frame_scores))
         eff_p75     = float(np.percentile(per_frame_scores, 75))
-        # Fraction of frames flagged as highly fake (image-level confidence ≥ 0.90)
-        frac_fake   = sum(1 for s in per_frame_scores if s >= 0.90) / len(per_frame_scores)
+        # Absolute count and fraction of frames flagged as strongly fake (≥ 0.90)
+        n_strongly  = sum(1 for s in per_frame_scores if s >= 0.90)
+        frac_fake   = n_strongly / len(per_frame_scores)
 
-        # Tiered aggregation — the key discriminator is fraction_fake_frames:
-        #   AI video:   many strongly-fake frames (frac ≥ 0.30, often ≥ 0.40)
-        #   Real video: only occasional outliers (frac < 0.25), max can still spike
-        # Single-frame outliers (real-video edits, cuts, effects) must NOT dominate.
-        if frac_fake >= 0.40:
-            # Heavy consensus that frames are AI → trust the max
+        # Tiered aggregation — different patterns map to different fake signatures:
+        #
+        #  • ≥ 4 strongly-fake frames (or ≥ 40 % of frames): obvious AI → trust max
+        #  • 2-3 strongly-fake frames in a 16-sample window:
+        #      This is the "high-quality AI video" signature. Modern generative
+        #      models (Sora, Runway, Veo, Seedance) produce mostly photorealistic
+        #      frames but slip up on a small number — and crucially, that slip-up
+        #      happens >1 frame because the artifact pattern is persistent.
+        #      Real videos with edit-cut outliers typically have only 1 such frame.
+        #  • 1 strongly-fake frame: most likely a real-video outlier (edit, motion
+        #      blur, dramatic lighting). Don't flag based on a single anomaly.
+        if n_strongly >= 4 or frac_fake >= 0.40:
             eff_aggregate = 0.85 * eff_max + 0.15 * eff_mean
         elif frac_fake >= 0.25 and eff_p75 >= 0.65:
-            # Moderate consensus → use p75
             eff_aggregate = eff_p75
         else:
-            # Weak/no consensus — single high-score frames are likely just edit
-            # artefacts in real footage; lean on mean and let it be uncertain
+            # Bimodal distribution with 1-3 strongly-fake frames is ambiguous:
+            # could be modern AI video (Sora/Runway/Seedance) or real video with
+            # edit cuts. EfficientNet alone can't tell them apart. Stay on mean
+            # and let the Gemini track decide — this is exactly what the C track
+            # was built for. (See _gemini_video_tiebreak below.)
             eff_aggregate = eff_mean
         eff_aggregate = _clamp(eff_aggregate)
     else:
         eff_mean = eff_max = eff_p75 = frac_fake = eff_aggregate = 0.0
+        n_strongly = 0
 
     # ── Combine: either track flipping fake is enough ────────────────────────
     combined_fake = max(videomae_fake, eff_aggregate)
     worst_idx     = int(np.argmax(per_frame_scores)) if per_frame_scores else 0
 
-    # ── Track C: Gemini specialist on the worst frame ────────────────────────
+    # ── Track C: Gemini specialist (whole video, with worst-frame fallback) ──
     # Triggers when:
     #   1. We haven't already confidently flagged fake (combined < HIGH)
     #   2. EfficientNet found at least one strongly-suspicious frame (max ≥ 0.85)
-    # This catches high-quality modern AI video (Sora / Runway / Veo) that
-    # produces photorealistic frames most of the time but slips up occasionally.
+    # This catches high-quality modern generative video (Sora/Runway/Veo/Seedance)
+    # that produces photorealistic frames most of the time but slips up occasionally.
+    # Whole-video Gemini call is more reliable than a single frame — it sees the
+    # temporal patterns AND uses a separate API quota bucket from image calls.
     gemini_score: "float | None" = None
     if combined_fake < HIGH_FAKE_THRESHOLD and eff_max >= 0.85 and per_frame_scores:
         _t_gem = _time.time()
-        worst_frame_pil = frames_pil[worst_idx]
-        gemini_score = _gemini_tiebreak_score(worst_frame_pil, eff_max)
+        # Primary: send the whole video
+        gemini_score = _gemini_video_tiebreak(video_path)
+        # Fallback: if video upload failed/timed out, try the worst frame
+        if gemini_score is None:
+            print("[scan-video-temporal] Gemini-video unavailable, trying worst frame", flush=True)
+            worst_frame_pil = frames_pil[worst_idx]
+            gemini_score = _gemini_tiebreak_score(worst_frame_pil, eff_max)
         print(f"[scan-video-temporal] Gemini tiebreak: {gemini_score} ({_time.time()-_t_gem:.1f}s)", flush=True)
         if gemini_score is not None:
-            # Weighted blend: Gemini's verdict carries 60% weight on the worst-frame
-            # score, then we take MAX against the existing combined to never lower
-            # an already-confident fake signal.
-            adjusted_worst = 0.4 * eff_max + 0.6 * gemini_score
-            combined_fake = max(combined_fake, adjusted_worst)
+            # Whole-video Gemini verdict carries higher weight (0.7) because it
+            # sees temporal patterns, not just one frame. Take max so this never
+            # lowers an already-confident existing fake signal.
+            combined_fake = max(combined_fake, gemini_score)
 
     # Decide which track won (for explanation)
     if gemini_score is not None and gemini_score > max(videomae_fake, eff_aggregate):
-        primary_signal = "Gemini visual forensics on the worst-scoring frame"
+        primary_signal = "Gemini video forensics on the full clip"
         signal_detail  = (
-            f"frame #{worst_idx+1} (EfficientNet: {eff_max:.2f}) — Gemini independently "
-            f"rated it {gemini_score:.2f} fake probability"
+            f"Gemini independently rated this video {gemini_score:.2f} fake probability "
+            f"after analysing temporal patterns across all frames"
         )
     elif eff_aggregate > videomae_fake:
         primary_signal = "per-frame AI-image classifier"
@@ -1779,13 +1859,14 @@ def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict
         "frame_scores":       [round(s, 4) for s in per_frame_scores],
         "label_scores":       va_result.get("label_scores", {}),
         "track_scores": {
-            "videomae_fake":          round(videomae_fake, 4),
-            "efficientnet_mean":      round(eff_mean, 4),
-            "efficientnet_max":       round(eff_max, 4),
-            "efficientnet_p75":       round(eff_p75, 4),
-            "efficientnet_aggregate": round(eff_aggregate, 4),
-            "fraction_fake_frames":   round(frac_fake, 4),
-            "gemini_worst_frame":     round(gemini_score, 4) if gemini_score is not None else None,
+            "videomae_fake":            round(videomae_fake, 4),
+            "efficientnet_mean":        round(eff_mean, 4),
+            "efficientnet_max":         round(eff_max, 4),
+            "efficientnet_p75":         round(eff_p75, 4),
+            "efficientnet_aggregate":   round(eff_aggregate, 4),
+            "fraction_fake_frames":     round(frac_fake, 4),
+            "n_strongly_fake_frames":   n_strongly,
+            "gemini_worst_frame":       round(gemini_score, 4) if gemini_score is not None else None,
         },
         "model_name":         va_result.get("model_name"),
         "video_metadata": {
