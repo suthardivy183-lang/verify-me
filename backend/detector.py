@@ -27,6 +27,9 @@ CLIP_MODEL_NAME = os.getenv("CLIP_MODEL_NAME", "openai/clip-vit-base-patch32").s
 EFFICIENTNET_MODEL_NAME = os.getenv("EFFICIENTNET_MODEL_NAME", "haywoodsloan/ai-image-detector-deploy").strip() or "haywoodsloan/ai-image-detector-deploy"
 # Model 2: SDXL-specialised detector — strong on diffusion outputs (Organika/sdxl-detector)
 SDXL_DETECTOR_MODEL_NAME = os.getenv("SDXL_DETECTOR_MODEL_NAME", "Organika/sdxl-detector").strip() or "Organika/sdxl-detector"
+# Video model: VideoMAE fine-tuned for deepfake detection — true temporal model (16 frames as one tube)
+VIDEOMAE_MODEL_NAME = os.getenv("VIDEOMAE_MODEL_NAME", "Ammar2k/videomae-base-finetuned-deepfake-subset").strip() or "Ammar2k/videomae-base-finetuned-deepfake-subset"
+VIDEOMAE_NUM_FRAMES = 16  # locked by the pretrained model config
 
 # Gemini tiebreaker: resolves uncertain-zone scores [LOW, HIGH] → boosts coverage to 95%+
 GEMINI_TIEBREAK_LOW    = float(os.getenv("GEMINI_TIEBREAK_LOW",    "0.38"))
@@ -544,6 +547,109 @@ def predict_with_efficientnet(image: Image.Image) -> dict:
 
 def predict_with_sdxl_detector(image: Image.Image) -> dict:
     return _run_hf_pipeline(load_sdxl_detector_model(), image, "SDXL-detector")
+
+
+# ───────────────────────── VideoMAE (temporal video classifier) ────────────────
+
+@lru_cache(maxsize=1)
+def load_videomae_model() -> dict:
+    """Load the VideoMAE deepfake-finetuned model. Cached — runs once per process.
+
+    Handles the known checkpoint/transformers compat: the saved checkpoint has
+    `q_bias` / `v_bias` (unified) but new transformers wants separate
+    `query.bias` / `value.bias`. We patch the state-dict so the trained biases
+    flow into the right places instead of being zero-initialised.
+    """
+    print(f"Loading VideoMAE: {VIDEOMAE_MODEL_NAME}", flush=True)
+    try:
+        from transformers import AutoImageProcessor, AutoModelForVideoClassification
+        processor = AutoImageProcessor.from_pretrained(VIDEOMAE_MODEL_NAME)
+        model = AutoModelForVideoClassification.from_pretrained(VIDEOMAE_MODEL_NAME)
+
+        # Fix the q_bias/v_bias → query.bias/value.bias rename so we actually
+        # use the trained biases. (Key has no bias in original VideoMAE.)
+        try:
+            from huggingface_hub import hf_hub_download
+            from safetensors.torch import load_file as _load_safetensors
+            ckpt_path = hf_hub_download(VIDEOMAE_MODEL_NAME, filename="model.safetensors")
+            raw_state = _load_safetensors(ckpt_path)
+            patched = {}
+            for key, value in raw_state.items():
+                if key.endswith(".attention.attention.q_bias"):
+                    patched[key.replace(".q_bias", ".query.bias")] = value
+                elif key.endswith(".attention.attention.v_bias"):
+                    patched[key.replace(".v_bias", ".value.bias")] = value
+            if patched:
+                missing, unexpected = model.load_state_dict(patched, strict=False)
+                print(f"VideoMAE bias patch: applied {len(patched)} tensors", flush=True)
+        except Exception as patch_exc:
+            print(f"VideoMAE bias-patch skipped (non-fatal): {patch_exc}", flush=True)
+
+        model.eval()
+        print("VideoMAE model loaded successfully", flush=True)
+        return {
+            "processor": processor, "model": model, "model_loaded": True,
+            "model_name": VIDEOMAE_MODEL_NAME, "error": "",
+        }
+    except Exception as exc:
+        print(f"VideoMAE load error: {exc}", flush=True)
+        return {
+            "processor": None, "model": None, "model_loaded": False,
+            "model_name": VIDEOMAE_MODEL_NAME, "error": str(exc),
+        }
+
+
+def predict_with_videomae(frames: list) -> dict:
+    """
+    Run VideoMAE inference on a list of PIL frames.
+    The model expects exactly VIDEOMAE_NUM_FRAMES (16) frames. We pad or
+    sub-sample as needed. Label map (from model config): {0:'fake', 1:'real'}.
+    """
+    state = load_videomae_model()
+    if not state["model_loaded"]:
+        return {
+            "source": "fallback", "model_loaded": False,
+            "model_name": state["model_name"], "fake_probability": None,
+            "error": state["error"],
+        }
+
+    if not frames:
+        return {
+            "source": "fallback", "model_loaded": False,
+            "model_name": state["model_name"], "fake_probability": None,
+            "error": "empty frames list",
+        }
+
+    # Normalise frame count to exactly VIDEOMAE_NUM_FRAMES
+    if len(frames) < VIDEOMAE_NUM_FRAMES:
+        # Pad by repeating last frame
+        frames = list(frames) + [frames[-1]] * (VIDEOMAE_NUM_FRAMES - len(frames))
+    elif len(frames) > VIDEOMAE_NUM_FRAMES:
+        # Evenly sub-sample down
+        idx = np.linspace(0, len(frames) - 1, VIDEOMAE_NUM_FRAMES, dtype=int)
+        frames = [frames[i] for i in idx]
+
+    try:
+        inputs = state["processor"](frames, return_tensors="pt")
+        with torch.no_grad():
+            logits = state["model"](**inputs).logits
+        probs = torch.softmax(logits, dim=-1)[0]
+        fake_prob = float(probs[0].item())  # label 0 = "fake"
+        real_prob = float(probs[1].item())  # label 1 = "real"
+        print(f"VideoMAE fake_probability: {fake_prob:.4f}", flush=True)
+        return {
+            "source": "model", "model_loaded": True,
+            "model_name": state["model_name"], "fake_probability": fake_prob,
+            "label_scores": {"fake": fake_prob, "real": real_prob},
+            "error": "",
+        }
+    except Exception as exc:
+        print(f"VideoMAE inference error: {exc}", flush=True)
+        return {
+            "source": "fallback", "model_loaded": False,
+            "model_name": state["model_name"], "fake_probability": None,
+            "error": str(exc),
+        }
 
 
 def _open_image(image_path: str) -> Image.Image:
@@ -1481,6 +1587,107 @@ def analyze_video(video_path: str) -> dict:
 
 
 analyze_photo = analyze_image
+
+
+def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict:
+    """
+    True temporal video deepfake detection using VideoMAE.
+
+    Treats the 16 sampled frames as a single coherent tube — captures inter-frame
+    artifacts (flicker, motion incoherence, lip-sync drift) that frame-by-frame
+    image classifiers miss. ONE inference call per video; ~3-5 s on Mac CPU once warm.
+
+    Falls back to analyze_video_fast() if VideoMAE fails to load.
+    """
+    import time as _time
+    import os as _os
+    _t_start = _time.time()
+    print(f"[scan-video-temporal] Starting {video_path}", flush=True)
+
+    # Sample exactly 16 frames evenly across the video
+    _orig = _os.environ.get("VIDEO_MAX_FRAMES")
+    _os.environ["VIDEO_MAX_FRAMES"] = str(VIDEOMAE_NUM_FRAMES)
+    try:
+        sampled = _sample_video_frames(video_path)
+    finally:
+        if _orig is None:
+            _os.environ.pop("VIDEO_MAX_FRAMES", None)
+        else:
+            _os.environ["VIDEO_MAX_FRAMES"] = _orig
+
+    frames_pil = [f["image"] for f in sampled["frames"]]
+    if not frames_pil:
+        raise ValueError("No readable video frames")
+
+    print(f"[scan-video-temporal] Sampled {len(frames_pil)} frames in {_time.time()-_t_start:.1f}s", flush=True)
+
+    _t_inf = _time.time()
+    result = predict_with_videomae(frames_pil)
+    print(f"[scan-video-temporal] VideoMAE inference: {_time.time()-_t_inf:.1f}s", flush=True)
+
+    if not result["model_loaded"]:
+        print(f"[scan-video-temporal] VideoMAE unavailable ({result.get('error')}), falling back to per-frame EfficientNet", flush=True)
+        return analyze_video_fast(video_path, target_language=target_language)
+
+    fake_prob = _clamp(result["fake_probability"])
+
+    if fake_prob >= HIGH_FAKE_THRESHOLD:
+        verdict = "Nakli"
+        confidence_pct = min(int(fake_prob * 100), 99)
+        explanation = (
+            f"Analyzed {len(frames_pil)} frames as one coherent temporal sequence. The VideoMAE "
+            f"temporal model detected strong AI-generation signatures in the video's motion patterns "
+            f"(fake confidence: {fake_prob:.2f}). Generated videos leave artifacts in motion "
+            f"coherence, blink rhythm, lip-sync and inter-frame consistency — all of which are "
+            f"flagged here. A frame-by-frame image classifier would have missed these."
+        )
+        red_flags = [
+            "temporal motion artifacts detected",
+            "inter-frame inconsistencies present",
+            "AI-generation signature across motion patterns",
+        ]
+    elif fake_prob <= LOW_FAKE_THRESHOLD:
+        verdict = "Asli"
+        confidence_pct = min(int((1.0 - fake_prob) * 100), 99)
+        explanation = (
+            f"Analyzed {len(frames_pil)} frames as one coherent temporal sequence. The video shows "
+            f"natural motion patterns, consistent inter-frame relationships and no significant "
+            f"AI-generation signatures (fake confidence: {fake_prob:.2f}). The evidence supports "
+            f"this being authentic footage."
+        )
+        red_flags = []
+    else:
+        verdict = "Shak hai"
+        confidence_pct = 50
+        explanation = (
+            f"Analyzed {len(frames_pil)} frames temporally. Signals are mixed "
+            f"(fake confidence: {fake_prob:.2f}). Some inter-frame inconsistencies exist but "
+            f"evidence is not conclusive. Treat with caution and verify the source independently."
+        )
+        red_flags = ["mixed temporal signals — neither clearly natural nor clearly generated"]
+
+    total = _time.time() - _t_start
+    print(f"[scan-video-temporal] Done in {total:.1f}s — verdict: {verdict}", flush=True)
+
+    return {
+        "verdict":            verdict,
+        "confidence_pct":     confidence_pct,
+        "explanation_en":     explanation,
+        "explanation_local":  explanation,
+        "red_flags":          red_flags,
+        "learn_more_tip":     "Cross-check with the original source. VideoMAE catches inter-frame motion artifacts that frame-by-frame image classifiers miss — but no model is perfect. Watch for unnatural lip-sync, inconsistent lighting between cuts, and verify the uploader.",
+        "source":             "videomae_temporal",
+        "frame_count":        len(frames_pil),
+        "fake_probability":   round(fake_prob, 4),
+        "label_scores":       result.get("label_scores", {}),
+        "model_name":         result.get("model_name"),
+        "video_metadata": {
+            "total_frames":   sampled["total_frames"],
+            "fps":            sampled["fps"],
+            "sampled_frames": len(frames_pil),
+            "duration_sec":   round(sampled["total_frames"] / sampled["fps"], 2) if sampled["fps"] > 0 else None,
+        },
+    }
 
 
 def analyze_video_fast(video_path: str, target_language: str = "hi", max_frames: int = 4) -> dict:

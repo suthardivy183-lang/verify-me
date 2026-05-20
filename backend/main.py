@@ -118,7 +118,12 @@ async def prewarm_models():
     def _warm():
         try:
             from PIL import Image
-            from detector import predict_with_efficientnet, predict_with_sdxl_detector
+            from detector import (
+                predict_with_efficientnet,
+                predict_with_sdxl_detector,
+                predict_with_videomae,
+                VIDEOMAE_NUM_FRAMES,
+            )
             dummy = Image.new("RGB", (224, 224), color=(128, 128, 128))
             t0 = _time.time()
             print("[prewarm] Loading EfficientNet...", flush=True)
@@ -128,6 +133,10 @@ async def prewarm_models():
             print("[prewarm] Loading SDXL detector...", flush=True)
             predict_with_sdxl_detector(dummy)
             print(f"[prewarm] SDXL detector ready in {_time.time()-t1:.1f}s", flush=True)
+            t2 = _time.time()
+            print("[prewarm] Loading VideoMAE (16-frame temporal model, ~360 MB)...", flush=True)
+            predict_with_videomae([dummy] * VIDEOMAE_NUM_FRAMES)
+            print(f"[prewarm] VideoMAE ready in {_time.time()-t2:.1f}s", flush=True)
             print(f"[prewarm] All models ready in {_time.time()-t0:.1f}s", flush=True)
         except Exception as exc:
             print(f"[prewarm] Failed: {exc}", flush=True)
@@ -472,7 +481,7 @@ async def scan_video(
         with open(tmp_path, "wb") as fh:
             fh.write(raw_bytes)
 
-        from detector import analyze_video_fast
+        from detector import analyze_video_temporal
         import asyncio
         import functools
 
@@ -480,11 +489,13 @@ async def scan_video(
             # Run blocking PyTorch inference in a threadpool so it does NOT
             # freeze the event loop (single uvicorn worker would otherwise
             # be unable to accept any other request while inference runs).
+            # analyze_video_temporal uses VideoMAE (true temporal model) and
+            # falls back to per-frame EfficientNet if VideoMAE fails to load.
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
                 functools.partial(
-                    analyze_video_fast, tmp_path, target_language=normalized_language
+                    analyze_video_temporal, tmp_path, target_language=normalized_language
                 ),
             )
         except ValueError as exc:
