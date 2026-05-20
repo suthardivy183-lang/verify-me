@@ -23,6 +23,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env
 
 APP_VERSION = "0.2.0"
 START_TIME = time.time()
+MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 # ───────────────────────── Firebase init ─────────────────────────
@@ -234,6 +235,7 @@ _SCAN_EXAMPLE_RESPONSE = {
             "content": {"application/json": {"example": _SCAN_EXAMPLE_RESPONSE}},
         },
         400: {"description": "Invalid image or unsupported language"},
+        413: {"description": "Image file too large"}, # Added for payload too large
         500: {"description": "Internal analysis error"},
     },
 )
@@ -242,9 +244,15 @@ async def scan(
     target_language: str = Form("hi", description="Output language: 'hi' | 'gu' | 'en'"),
     user_context: str = Form(None, description='Optional context, e.g. "received via WhatsApp"'),
 ):
+    if image.content_type not in {"image/jpeg", "image/png"}:
+        raise HTTPException(status_code=400, detail="Unsupported image type. Only JPEG and PNG are allowed.")
+
     raw_bytes = await image.read()
     if not raw_bytes:
         raise HTTPException(status_code=400, detail="Empty image upload")
+    
+    if len(raw_bytes) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"Image file too large. Max size is {MAX_IMAGE_UPLOAD_BYTES / (1024 * 1024):.0f}MB.")
 
     image_hash_full = hashlib.sha256(raw_bytes).hexdigest()
     image_hash = image_hash_full[:12]

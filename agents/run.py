@@ -19,7 +19,7 @@ from pathlib import Path
 # Allow `python -m agents.run` from project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agents.orchestrator import orchestrate
+from agents.orchestrator import orchestrate, autodiscover
 
 
 def main():
@@ -29,6 +29,10 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument("task", nargs="?", help="Natural-language task to perform")
+    parser.add_argument(
+        "--auto", action="store_true",
+        help="Autonomous mode: Opus reads the project and assigns tasks itself",
+    )
     parser.add_argument(
         "--mode", choices=["sequential", "parallel"], default="sequential",
         help="Execution mode (default: sequential)",
@@ -51,8 +55,8 @@ def main():
     )
     args = parser.parse_args()
 
-    # Interactive mode if no task given
-    if not args.task:
+    # Interactive mode if no task given and not in auto mode
+    if not args.task and not args.auto:
         print("VerifyMe Multi-Agent Orchestrator")
         print("──────────────────────────────────")
         print("Examples:")
@@ -65,17 +69,23 @@ def main():
             print("No task provided. Exiting.")
             sys.exit(0)
 
-    api_key = args.api_key or os.environ.get("ANTHROPIC_API_KEY")
+    api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        print("ERROR: Set ANTHROPIC_API_KEY environment variable or pass --api-key")
+        print("ERROR: Set GEMINI_API_KEY environment variable or pass --api-key")
         sys.exit(1)
 
+    if args.auto:
+        autodiscover(
+            api_key=api_key,
+            mode=args.mode,
+            verbose=not args.quiet,
+            summarise=not args.no_summary,
+        )
+        return
+
     if args.dry_run:
-        # Plan only, don't execute
-        import anthropic
         from agents.orchestrator import _plan
-        client = anthropic.Anthropic(api_key=api_key)
-        subtasks = _plan(client, args.task)
+        subtasks = _plan(api_key, args.task)
         print("\nDRY RUN — Plan only:\n")
         for i, st in enumerate(subtasks, 1):
             deps = f"  → depends on: {st.depends_on}" if st.depends_on else ""

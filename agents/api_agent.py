@@ -3,8 +3,7 @@ API Agent — specialist for backend changes (FastAPI, Python, detector logic).
 Scope: backend/ directory only.
 """
 
-import anthropic
-from .base_agent import run_agent, AgentResult
+from .gemini_base import run_agent, AgentResult, AGENT_MODEL
 from .tools import API_TOOLS
 
 SYSTEM_PROMPT = """\
@@ -22,12 +21,13 @@ Rules:
 """
 
 
-def run(client: anthropic.Anthropic, task: str, verbose: bool = True) -> AgentResult:
+def run(api_key: str, task: str, verbose: bool = True) -> AgentResult:
     return run_agent(
-        client=client,
+        api_key=api_key,
         agent_name="API",
         system_prompt=SYSTEM_PROMPT,
         task=task,
         tools=API_TOOLS,
+        model=AGENT_MODEL,
         verbose=verbose,
     )

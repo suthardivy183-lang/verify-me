@@ -152,26 +152,31 @@ class TestBaseAgent:
 
 class TestOrchestrator:
     def test_plan_parses_json(self):
-        """_plan returns a list of SubTask objects from a JSON response."""
-        client = MagicMock()
+        """_plan returns SubTask list — mock the Gemini client.models.generate_content."""
         plan_json = json.dumps([
             {"agent": "api", "task": "Add /health endpoint", "depends_on": []},
             {"agent": "test", "task": "Test /health endpoint", "depends_on": ["api"]},
         ])
-        client.messages.create.return_value = _make_text_response(plan_json)
+        mock_response = MagicMock()
+        mock_response.text = plan_json
 
-        subtasks = _plan(client, "Add a health endpoint with tests")
+        with patch("agents.orchestrator.genai.Client") as MockClient:
+            MockClient.return_value.models.generate_content.return_value = mock_response
+            subtasks = _plan("fake-key", "Add a health endpoint with tests")
 
         assert len(subtasks) == 2
         assert subtasks[0].agent == "api"
         assert subtasks[1].depends_on == ["api"]
 
     def test_plan_strips_markdown_fences(self):
-        client = MagicMock()
         fenced = '```json\n[{"agent": "ui", "task": "Add button", "depends_on": []}]\n```'
-        client.messages.create.return_value = _make_text_response(fenced)
+        mock_response = MagicMock()
+        mock_response.text = fenced
 
-        subtasks = _plan(client, "Add a button")
+        with patch("agents.orchestrator.genai.Client") as MockClient:
+            MockClient.return_value.models.generate_content.return_value = mock_response
+            subtasks = _plan("fake-key", "Add a button")
+
         assert len(subtasks) == 1
         assert subtasks[0].agent == "ui"
 
@@ -179,11 +184,11 @@ class TestOrchestrator:
         """API agent must complete before Test agent runs."""
         call_order = []
 
-        def fake_api_run(client, task, verbose):
+        def fake_api_run(api_key, task, verbose):
             call_order.append("api")
             return AgentResult("API", task, "endpoint added", 1)
 
-        def fake_test_run(client, task, verbose):
+        def fake_test_run(api_key, task, verbose):
             call_order.append("test")
             return AgentResult("Test", task, "tests passed", 1)
 
@@ -197,7 +202,7 @@ class TestOrchestrator:
 
         with patch.object(api_mod,  "run", fake_api_run), \
              patch.object(test_mod, "run", fake_test_run):
-            results = run_sequential(MagicMock(), subtasks, verbose=False)
+            results = run_sequential("fake-key", subtasks, verbose=False)
 
         assert call_order == ["api", "test"]
         assert "api"  in results
@@ -209,4 +214,4 @@ class TestOrchestrator:
             SubTask(agent="test", task="y", depends_on=["api"]),
         ]
         with pytest.raises(RuntimeError, match="Circular"):
-            run_sequential(MagicMock(), subtasks, verbose=False)
+            run_sequential("fake-key", subtasks, verbose=False)

@@ -5,39 +5,26 @@
 const API_BASE = (window.ASLI_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 // ─── Firebase config ──────────────────────────────────────────────────────────
-// Replace ALL placeholder values with your project's config:
-//   console.firebase.google.com → Project Settings → Your apps → SDK setup and config
-//
-// TO TEST:
-// 1. Replace placeholder values below with your real Firebase config
-// 2. Enable Google provider: Firebase Console → Authentication → Sign-in method → Google → Enable
-// 3. Add authorized domains: Authentication → Settings → Authorized domains
-//    (add "localhost" for local dev + your Firebase Hosting URL for prod)
-// 4. Open frontend, click "Sign in" — Google popup should appear
-// 5. Verify navbar switches to avatar + first name state
-// 6. Refresh page — user should still be logged in (Firebase persists session)
-// 7. Click name → dropdown → "Sign out" — verify reverts to sign-in button
-const firebaseConfig = {
-  apiKey:            'AIzaSyBWJ_zMA8R45iuXLifEaBm5NVh6zCe1ghM',
-  authDomain:        'asli-solution-challenge.firebaseapp.com',
-  projectId:         'asli-solution-challenge',
-  storageBucket:     'asli-solution-challenge.firebasestorage.app',
-  messagingSenderId: '229619506340',
-  appId:             '1:229619506340:web:37c92311c615ac6143da31',
-};
+// Firebase configuration is now dynamically injected into window.asliFirebaseConfig
+// from frontend/index.html.
 
 let _firebaseReady = false;
 let auth = null;
 let db   = null;
 
-try {
-  firebase.initializeApp(firebaseConfig);
-  auth = firebase.auth();
-  db   = firebase.firestore();
-  _firebaseReady = true;
-} catch (e) {
-  // Firebase unavailable — guest-only mode, scan flow unaffected
-  console.warn('Firebase init skipped (placeholder config or SDK error):', e.message);
+// Use window.asliFirebaseConfig if available and not using placeholder values
+if (window.asliFirebaseConfig && window.asliFirebaseConfig.apiKey && window.asliFirebaseConfig.apiKey !== 'YOUR_FIREBASE_API_KEY') {
+  try {
+    firebase.initializeApp(window.asliFirebaseConfig);
+    auth = firebase.auth();
+    db   = firebase.firestore();
+    _firebaseReady = true;
+  } catch (e) {
+    // Firebase unavailable — guest-only mode, scan flow unaffected
+    console.warn('Firebase init skipped (invalid config or SDK error):', e.message);
+  }
+} else {
+  console.warn('Firebase init skipped (configuration not found or using placeholder).');
 }
 
 // ─── i18n strings ──────────────────────────────────────────────────────────
@@ -858,7 +845,7 @@ function _settingsSectionLanguage() {
       `</button>`
     );
   }).join('');
-  return _settingsCard('Language', '\u{1F310}', '',
+  return _settingsCard('Language', '🌎', '',
     `<p class="text-sm text-asli-muted mb-3">Default language for results</p>` +
     `<div class="flex gap-2">${btns}</div>`
   );
@@ -873,7 +860,7 @@ function _settingsSectionNotifications() {
         `<div class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm"></div>` +
       `</div>` +
     `</label>`;
-  return _settingsCard('Notifications', '\u{1F514}', badge,
+  return _settingsCard('Notifications', '🔔', badge,
     `<div class="opacity-50 pointer-events-none">` +
       row('Scam alerts in my area') +
       `<div style="border-top:1px solid #F1F5F9"></div>` +
@@ -884,7 +871,7 @@ function _settingsSectionNotifications() {
 
 function _settingsSectionAccount(user) {
   if (!user) {
-    return _settingsCard('Account', '\u{1F464}', '',
+    return _settingsCard('Account', '👤', '',
       `<p class="text-sm text-asli-muted mb-3">Sign in to manage your account and scan history.</p>` +
       `<button id="settings-signin-btn" ` +
         `class="w-full rounded-xl bg-ink text-white font-semibold py-2.5 text-sm hover:bg-slate-800 transition shadow-lift">` +
@@ -892,7 +879,7 @@ function _settingsSectionAccount(user) {
       `</button>`
     );
   }
-  return _settingsCard('Account', '\u{1F464}', '',
+  return _settingsCard('Account', '👤', '',
     `<div class="flex items-center gap-3 mb-4">` +
       `<img src="${escapeHtml(user.photoURL || '')}" alt="" class="w-12 h-12 rounded-full bg-slate-100 object-cover shrink-0 ring-2 ring-slate-100" />` +
       `<div class="min-w-0">` +
@@ -915,7 +902,7 @@ function _settingsSectionAccount(user) {
 }
 
 function _settingsSectionAbout() {
-  return _settingsCard('About Asli', '\u{2139}\u{FE0F}', '',
+  return _settingsCard('About Asli', 'ℹ️', '',
     `<p class="text-sm font-medium text-asli-text mb-0.5">Version 1.0.0</p>` +
     `<p class="text-sm text-asli-muted mb-1">Built for Google Solution Challenge 2026</p>` +
     `<p class="text-xs text-asli-muted mb-3">Theme: Digital Asset Protection &nbsp;·&nbsp; SDG 16 · SDG 10</p>` +
@@ -936,7 +923,7 @@ function _settingsSectionPrivacy() {
     `<li class="flex gap-2 items-start text-sm text-asli-muted">` +
       `<span class="shrink-0 mt-0.5" style="color:#16A34A">✓</span>${text}` +
     `</li>`;
-  return _settingsCard('Privacy', '\u{1F512}', '',
+  return _settingsCard('Privacy', '🔒', '',
     `<ul class="space-y-2 mb-4">` +
       item('We never store your original images on our servers.') +
       item('Only a 100×100 px thumbnail and anonymized metadata are saved to your history.') +
@@ -1577,7 +1564,7 @@ async function downloadReport() {
   if (y > 220) { doc.addPage(); y = 20; }
   y = await addSectionHeader(doc, PS.sec_method, y, M, CW, lang);
   y = await addBodyText(doc, PS.method_text, y, M, CW, lang);
-  y += 6;
+    y += 6;
 
   // ═══ MEDIA LITERACY TIP ═══
   // tip comes from API — usually in the selected language if backend localizes it; use as-is

@@ -3,8 +3,7 @@ Test Agent — writes and runs pytest tests for backend endpoints and utilities.
 Scope: tests/ directory (write), backend/ (read-only), can run pytest.
 """
 
-import anthropic
-from .base_agent import run_agent, AgentResult
+from .gemini_base import run_agent, AgentResult, AGENT_MODEL
 from .tools import TEST_TOOLS
 
 SYSTEM_PROMPT = """\
@@ -23,12 +22,13 @@ Rules:
 """
 
 
-def run(client: anthropic.Anthropic, task: str, verbose: bool = True) -> AgentResult:
+def run(api_key: str, task: str, verbose: bool = True) -> AgentResult:
     return run_agent(
-        client=client,
+        api_key=api_key,
         agent_name="Test",
         system_prompt=SYSTEM_PROMPT,
         task=task,
         tools=TEST_TOOLS,
+        model=AGENT_MODEL,
         verbose=verbose,
     )

@@ -68,6 +68,15 @@
     window.ASLI_API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? 'http://localhost:8000'
       : 'https://asli-api-229619506340.asia-south1.run.app';
+
+    window.asliFirebaseConfig = {
+      apiKey:            'YOUR_FIREBASE_API_KEY',
+      authDomain:        'YOUR_FIREBASE_AUTH_DOMAIN',
+      projectId:         'YOUR_FIREBASE_PROJECT_ID',
+      storageBucket:     'YOUR_FIREBASE_STORAGE_BUCKET',
+      messagingSenderId: 'YOUR_FIREBASE_MESSAGING_SENDER_ID',
+      appId:             'YOUR_FIREBASE_APP_ID',
+    };
   </script>
 </head>
 <body class="bg-asli-bg text-asli-text antialiased min-h-screen font-sans">
@@ -464,7 +473,7 @@
         <div class="flex-1 min-w-0">
           <p id="confidence-label-i18n" class="text-xs uppercase tracking-wider text-asli-muted mb-1"></p>
           <p class="text-3xl font-extrabold leading-none">
-            <span id="confidence-num">0</span><span class="text-lg text-asli-muted">%</span>
+            <span id="confidence-num">0</span><span class="text-lg text-asli-muted"></span>
           </p>
         </div>
       </div>
