@@ -1680,8 +1680,33 @@ def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict
     combined_fake = max(videomae_fake, eff_aggregate)
     worst_idx     = int(np.argmax(per_frame_scores)) if per_frame_scores else 0
 
+    # ── Track C: Gemini specialist on the worst frame ────────────────────────
+    # Triggers when:
+    #   1. We haven't already confidently flagged fake (combined < HIGH)
+    #   2. EfficientNet found at least one strongly-suspicious frame (max ≥ 0.85)
+    # This catches high-quality modern AI video (Sora / Runway / Veo) that
+    # produces photorealistic frames most of the time but slips up occasionally.
+    gemini_score: "float | None" = None
+    if combined_fake < HIGH_FAKE_THRESHOLD and eff_max >= 0.85 and per_frame_scores:
+        _t_gem = _time.time()
+        worst_frame_pil = frames_pil[worst_idx]
+        gemini_score = _gemini_tiebreak_score(worst_frame_pil, eff_max)
+        print(f"[scan-video-temporal] Gemini tiebreak: {gemini_score} ({_time.time()-_t_gem:.1f}s)", flush=True)
+        if gemini_score is not None:
+            # Weighted blend: Gemini's verdict carries 60% weight on the worst-frame
+            # score, then we take MAX against the existing combined to never lower
+            # an already-confident fake signal.
+            adjusted_worst = 0.4 * eff_max + 0.6 * gemini_score
+            combined_fake = max(combined_fake, adjusted_worst)
+
     # Decide which track won (for explanation)
-    if eff_aggregate > videomae_fake:
+    if gemini_score is not None and gemini_score > max(videomae_fake, eff_aggregate):
+        primary_signal = "Gemini visual forensics on the worst-scoring frame"
+        signal_detail  = (
+            f"frame #{worst_idx+1} (EfficientNet: {eff_max:.2f}) — Gemini independently "
+            f"rated it {gemini_score:.2f} fake probability"
+        )
+    elif eff_aggregate > videomae_fake:
         primary_signal = "per-frame AI-image classifier"
         signal_detail  = (
             f"{int(frac_fake * 100)}% of frames scored above 0.90 fake probability "
@@ -1695,6 +1720,7 @@ def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict
         f"[scan-video-temporal] VideoMAE={videomae_fake:.3f} | "
         f"Eff mean={eff_mean:.3f} max={eff_max:.3f} p75={eff_p75:.3f} "
         f"frac>=.90={frac_fake:.2f} agg={eff_aggregate:.3f} | "
+        f"Gemini={gemini_score if gemini_score is not None else 'skip'} | "
         f"COMBINED={combined_fake:.3f}",
         flush=True,
     )
@@ -1759,6 +1785,7 @@ def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict
             "efficientnet_p75":       round(eff_p75, 4),
             "efficientnet_aggregate": round(eff_aggregate, 4),
             "fraction_fake_frames":   round(frac_fake, 4),
+            "gemini_worst_frame":     round(gemini_score, 4) if gemini_score is not None else None,
         },
         "model_name":         va_result.get("model_name"),
         "video_metadata": {
