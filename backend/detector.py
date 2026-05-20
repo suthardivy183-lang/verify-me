@@ -1591,11 +1591,22 @@ analyze_photo = analyze_image
 
 def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict:
     """
-    True temporal video deepfake detection using VideoMAE.
+    Two-track ensemble video deepfake detection.
 
-    Treats the 16 sampled frames as a single coherent tube — captures inter-frame
-    artifacts (flicker, motion incoherence, lip-sync drift) that frame-by-frame
-    image classifiers miss. ONE inference call per video; ~3-5 s on Mac CPU once warm.
+    Track A — VideoMAE temporal model (16 frames as one tube):
+        Catches face-swap / temporal artifacts (lip-sync drift, blink-rhythm,
+        inter-frame jitter — the classic FaceForensics-era deepfake signals).
+
+    Track B — EfficientNet per-frame AI-image classifier (16 frames):
+        Catches modern generative AI video (Sora, Runway, Pika, Veo, etc.).
+        Each frame of an AI-generated video is itself an AI-generated image,
+        and EfficientNet was fine-tuned to spot those per-image diffusion
+        artifacts. CRITICAL: aggregate by MAX/p75, not mean — a single cut
+        to stock footage at the end can pull mean below threshold while
+        the first 75% of frames are blatant fakes.
+
+    Final score = max(VideoMAE fake_prob, EfficientNet aggregated fake signal).
+    Either track flipping fake is enough to flag the video.
 
     Falls back to analyze_video_fast() if VideoMAE fails to load.
     """
@@ -1604,7 +1615,6 @@ def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict
     _t_start = _time.time()
     print(f"[scan-video-temporal] Starting {video_path}", flush=True)
 
-    # Sample exactly 16 frames evenly across the video
     _orig = _os.environ.get("VIDEO_MAX_FRAMES")
     _os.environ["VIDEO_MAX_FRAMES"] = str(VIDEOMAE_NUM_FRAMES)
     try:
@@ -1621,50 +1631,110 @@ def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict
 
     print(f"[scan-video-temporal] Sampled {len(frames_pil)} frames in {_time.time()-_t_start:.1f}s", flush=True)
 
-    _t_inf = _time.time()
-    result = predict_with_videomae(frames_pil)
-    print(f"[scan-video-temporal] VideoMAE inference: {_time.time()-_t_inf:.1f}s", flush=True)
+    # ── Track A: VideoMAE (temporal, face-swap detection) ────────────────────
+    _t_va = _time.time()
+    va_result = predict_with_videomae(frames_pil)
+    print(f"[scan-video-temporal] VideoMAE: {_time.time()-_t_va:.1f}s", flush=True)
 
-    if not result["model_loaded"]:
-        print(f"[scan-video-temporal] VideoMAE unavailable ({result.get('error')}), falling back to per-frame EfficientNet", flush=True)
+    if not va_result["model_loaded"]:
+        print(f"[scan-video-temporal] VideoMAE unavailable ({va_result.get('error')}), falling back to per-frame EfficientNet", flush=True)
         return analyze_video_fast(video_path, target_language=target_language)
 
-    fake_prob = _clamp(result["fake_probability"])
+    videomae_fake = _clamp(va_result["fake_probability"])
 
-    if fake_prob >= HIGH_FAKE_THRESHOLD:
+    # ── Track B: EfficientNet per-frame (modern AI-video detection) ──────────
+    _t_eff = _time.time()
+    per_frame_scores: list[float] = []
+    for f in frames_pil:
+        eff = predict_with_efficientnet(f).get("fake_probability")
+        if eff is not None:
+            per_frame_scores.append(_clamp(float(eff)))
+    print(f"[scan-video-temporal] EfficientNet 16-frame: {_time.time()-_t_eff:.1f}s", flush=True)
+
+    if per_frame_scores:
+        eff_mean    = float(np.mean(per_frame_scores))
+        eff_max     = float(np.max(per_frame_scores))
+        eff_p75     = float(np.percentile(per_frame_scores, 75))
+        # Fraction of frames flagged as highly fake (image-level confidence ≥ 0.90)
+        frac_fake   = sum(1 for s in per_frame_scores if s >= 0.90) / len(per_frame_scores)
+
+        # Tiered aggregation — the key discriminator is fraction_fake_frames:
+        #   AI video:   many strongly-fake frames (frac ≥ 0.30, often ≥ 0.40)
+        #   Real video: only occasional outliers (frac < 0.25), max can still spike
+        # Single-frame outliers (real-video edits, cuts, effects) must NOT dominate.
+        if frac_fake >= 0.40:
+            # Heavy consensus that frames are AI → trust the max
+            eff_aggregate = 0.85 * eff_max + 0.15 * eff_mean
+        elif frac_fake >= 0.25 and eff_p75 >= 0.65:
+            # Moderate consensus → use p75
+            eff_aggregate = eff_p75
+        else:
+            # Weak/no consensus — single high-score frames are likely just edit
+            # artefacts in real footage; lean on mean and let it be uncertain
+            eff_aggregate = eff_mean
+        eff_aggregate = _clamp(eff_aggregate)
+    else:
+        eff_mean = eff_max = eff_p75 = frac_fake = eff_aggregate = 0.0
+
+    # ── Combine: either track flipping fake is enough ────────────────────────
+    combined_fake = max(videomae_fake, eff_aggregate)
+    worst_idx     = int(np.argmax(per_frame_scores)) if per_frame_scores else 0
+
+    # Decide which track won (for explanation)
+    if eff_aggregate > videomae_fake:
+        primary_signal = "per-frame AI-image classifier"
+        signal_detail  = (
+            f"{int(frac_fake * 100)}% of frames scored above 0.90 fake probability "
+            f"(max: {eff_max:.2f}, p75: {eff_p75:.2f})"
+        )
+    else:
+        primary_signal = "VideoMAE temporal model"
+        signal_detail  = f"fake confidence across the temporal sequence: {videomae_fake:.2f}"
+
+    print(
+        f"[scan-video-temporal] VideoMAE={videomae_fake:.3f} | "
+        f"Eff mean={eff_mean:.3f} max={eff_max:.3f} p75={eff_p75:.3f} "
+        f"frac>=.90={frac_fake:.2f} agg={eff_aggregate:.3f} | "
+        f"COMBINED={combined_fake:.3f}",
+        flush=True,
+    )
+
+    if combined_fake >= HIGH_FAKE_THRESHOLD:
         verdict = "Nakli"
-        confidence_pct = min(int(fake_prob * 100), 99)
+        confidence_pct = min(int(combined_fake * 100), 99)
         explanation = (
-            f"Analyzed {len(frames_pil)} frames as one coherent temporal sequence. The VideoMAE "
-            f"temporal model detected strong AI-generation signatures in the video's motion patterns "
-            f"(fake confidence: {fake_prob:.2f}). Generated videos leave artifacts in motion "
-            f"coherence, blink rhythm, lip-sync and inter-frame consistency — all of which are "
-            f"flagged here. A frame-by-frame image classifier would have missed these."
+            f"Analyzed {len(frames_pil)} frames using both a temporal video model and a "
+            f"per-frame AI-image classifier. The strongest signal came from the {primary_signal}: "
+            f"{signal_detail}. Combined fake confidence: {combined_fake:.2f}. This pattern matches "
+            f"either generative AI video (Sora/Runway/Pika-style) or a face-swap deepfake — both "
+            f"are flagged."
         )
         red_flags = [
-            "temporal motion artifacts detected",
-            "inter-frame inconsistencies present",
-            "AI-generation signature across motion patterns",
+            f"{primary_signal} flagged AI-generation signatures",
+            f"per-frame max fake score: {eff_max:.2f}",
+            f"fraction of strongly-fake frames: {int(frac_fake*100)}%",
         ]
-    elif fake_prob <= LOW_FAKE_THRESHOLD:
+    elif combined_fake <= LOW_FAKE_THRESHOLD:
         verdict = "Asli"
-        confidence_pct = min(int((1.0 - fake_prob) * 100), 99)
+        confidence_pct = min(int((1.0 - combined_fake) * 100), 99)
         explanation = (
-            f"Analyzed {len(frames_pil)} frames as one coherent temporal sequence. The video shows "
-            f"natural motion patterns, consistent inter-frame relationships and no significant "
-            f"AI-generation signatures (fake confidence: {fake_prob:.2f}). The evidence supports "
-            f"this being authentic footage."
+            f"Analyzed {len(frames_pil)} frames using both a temporal model and a per-frame "
+            f"AI-image classifier. Neither track found significant AI-generation signatures "
+            f"(VideoMAE: {videomae_fake:.2f}, EfficientNet aggregate: {eff_aggregate:.2f}). "
+            f"The evidence supports this being authentic footage."
         )
         red_flags = []
     else:
         verdict = "Shak hai"
         confidence_pct = 50
         explanation = (
-            f"Analyzed {len(frames_pil)} frames temporally. Signals are mixed "
-            f"(fake confidence: {fake_prob:.2f}). Some inter-frame inconsistencies exist but "
-            f"evidence is not conclusive. Treat with caution and verify the source independently."
+            f"Analyzed {len(frames_pil)} frames. Signals are mixed "
+            f"(VideoMAE: {videomae_fake:.2f}, EfficientNet aggregate: {eff_aggregate:.2f}). "
+            f"Some frames show AI signatures, others don't. Treat with caution and verify the source."
         )
-        red_flags = ["mixed temporal signals — neither clearly natural nor clearly generated"]
+        red_flags = [
+            f"inconsistent signals — {int(frac_fake*100)}% of frames flagged, others clean",
+        ]
 
     total = _time.time() - _t_start
     print(f"[scan-video-temporal] Done in {total:.1f}s — verdict: {verdict}", flush=True)
@@ -1675,12 +1745,22 @@ def analyze_video_temporal(video_path: str, target_language: str = "hi") -> dict
         "explanation_en":     explanation,
         "explanation_local":  explanation,
         "red_flags":          red_flags,
-        "learn_more_tip":     "Cross-check with the original source. VideoMAE catches inter-frame motion artifacts that frame-by-frame image classifiers miss — but no model is perfect. Watch for unnatural lip-sync, inconsistent lighting between cuts, and verify the uploader.",
-        "source":             "videomae_temporal",
+        "learn_more_tip":     "Two detection tracks are running: VideoMAE for face-swap/temporal artifacts, and EfficientNet per-frame for modern generative-AI video. Either one finding strong signals is enough to flag the video. Always cross-check with the original source.",
+        "source":             "videomae_temporal+efficientnet_perframe",
         "frame_count":        len(frames_pil),
-        "fake_probability":   round(fake_prob, 4),
-        "label_scores":       result.get("label_scores", {}),
-        "model_name":         result.get("model_name"),
+        "fake_probability":   round(combined_fake, 4),
+        "worst_frame_index":  worst_idx,
+        "frame_scores":       [round(s, 4) for s in per_frame_scores],
+        "label_scores":       va_result.get("label_scores", {}),
+        "track_scores": {
+            "videomae_fake":          round(videomae_fake, 4),
+            "efficientnet_mean":      round(eff_mean, 4),
+            "efficientnet_max":       round(eff_max, 4),
+            "efficientnet_p75":       round(eff_p75, 4),
+            "efficientnet_aggregate": round(eff_aggregate, 4),
+            "fraction_fake_frames":   round(frac_fake, 4),
+        },
+        "model_name":         va_result.get("model_name"),
         "video_metadata": {
             "total_frames":   sampled["total_frames"],
             "fps":            sampled["fps"],
